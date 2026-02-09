@@ -3,13 +3,14 @@ import { useAuth } from './AuthContext';
 import Contacto from './components/Contacto';
 import Modal from './components/Modal';
 import { getRelevamientoBalnFechas, getRelevamientoBaln, saveRelevamientoBaln } from './data/balnearios.js';
+import { backendRequest } from './data/backendApi.js';
 
 const LOCALIDADES_OPTIONS = ['Villa Gesell', 'Mar de las Pampas', 'Mar Azul', 'Las Gaviotas', 'Colonia Marina'];
 const OFICINAS_OPTIONS = ['Centro', 'Mar de las Pampas', 'Norte', 'Terminal'];
 const LLAMADOS_OPTIONS = ['Envié WhatsApp', 'Llamado', 'No llama', 'Sin contacto', 'Tel fijo'];
 
 export default function Balnearios() {
-  const { supabase, user, canEditBalnearios, isAdmin } = useAuth();
+  const { dataClient, supabase, user, canEditBalnearios, isAdmin } = useAuth();
   const [tab, setTab] = useState('relevamiento');
   const [fechas, setFechas] = useState([]);
   const [fecha, setFecha] = useState('');
@@ -43,7 +44,7 @@ export default function Balnearios() {
   };
 
   const loadFechas = () => {
-    getRelevamientoBalnFechas(supabase)
+    getRelevamientoBalnFechas(dataClient)
       .then((arr) => {
         setFechas(arr);
         if (arr.length && (!fecha || !arr.includes(fecha))) setFecha(arr[0]);
@@ -59,7 +60,7 @@ export default function Balnearios() {
       return;
     }
     setLoading(true);
-    getRelevamientoBaln(supabase, fecha, isAdmin)
+    getRelevamientoBaln(dataClient, fecha, isAdmin)
       .then(setData)
       .catch(() => setError('Error al cargar'))
       .finally(() => setLoading(false));
@@ -68,11 +69,16 @@ export default function Balnearios() {
   const loadList = async () => {
     setListLoading(true);
     try {
-      let q = supabase.from('balnearios').select('*').order('prestador');
-      if (!isAdmin) q = q.or('oculto.is.null,oculto.eq.0');
-      const { data, error } = await q;
-      if (error) throw error;
-      setList(data || []);
+      if (dataClient?._backend) {
+        const data = await backendRequest(dataClient, '/api/balnearios');
+        setList(Array.isArray(data) ? data : []);
+      } else {
+        let q = supabase.from('balnearios').select('*').order('prestador');
+        if (!isAdmin) q = q.or('oculto.is.null,oculto.eq.0');
+        const { data, error } = await q;
+        if (error) throw error;
+        setList(data || []);
+      }
     } catch {
       setError('Error al cargar');
     } finally {
@@ -97,7 +103,7 @@ export default function Balnearios() {
       oficina: field === 'oficina' ? value : (r.oficina ?? item.balneario?.oficina ?? null),
     };
     try {
-      const updated = await saveRelevamientoBaln(supabase, payload, user?.nombre);
+      const updated = await saveRelevamientoBaln(dataClient, payload, user?.nombre);
       setData((prev) => ({
         ...prev,
         list: prev.list.map((x) =>
@@ -143,12 +149,20 @@ export default function Balnearios() {
       oficina: form.oficina || null,
     };
     try {
-      if (editing === 'new') {
-        const { error } = await supabase.from('balnearios').insert(row);
-        if (error) throw error;
+      if (dataClient?._backend) {
+        if (editing === 'new') {
+          await backendRequest(dataClient, '/api/balnearios', { method: 'POST', body: JSON.stringify(row) });
+        } else {
+          await backendRequest(dataClient, `/api/balnearios/${editing}`, { method: 'PUT', body: JSON.stringify(row) });
+        }
       } else {
-        const { error } = await supabase.from('balnearios').update(row).eq('id', editing);
-        if (error) throw error;
+        if (editing === 'new') {
+          const { error } = await supabase.from('balnearios').insert(row);
+          if (error) throw error;
+        } else {
+          const { error } = await supabase.from('balnearios').update(row).eq('id', editing);
+          if (error) throw error;
+        }
       }
       cancel();
       loadList();
@@ -158,10 +172,20 @@ export default function Balnearios() {
   };
   const remove = async (id) => {
     if (!window.confirm('¿Eliminar este balneario?')) return;
+    if (dataClient?._backend) {
+      await backendRequest(dataClient, `/api/balnearios/${id}`, { method: 'DELETE' });
+      loadList();
+      return;
+    }
     const { error } = await supabase.from('balnearios').delete().eq('id', id);
     if (!error) loadList();
   };
   const toggleOculto = async (i) => {
+    if (dataClient?._backend) {
+      await backendRequest(dataClient, `/api/balnearios/${i.id}`, { method: 'PUT', body: JSON.stringify({ ...i, oculto: i.oculto ? 0 : 1 }) });
+      loadList();
+      return;
+    }
     const { error } = await supabase.from('balnearios').update({ oculto: i.oculto ? 0 : 1 }).eq('id', i.id);
     if (!error) loadList();
   };

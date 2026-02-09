@@ -4,12 +4,13 @@ import Contacto from './components/Contacto';
 import Modal from './components/Modal';
 import { CATEGORIAS_OPTIONS, normalizeCategoriaDisplay } from './utils/categoria';
 import { getRelevamientoFechas, getRelevamiento, saveRelevamiento, copiarUltimoRelevamiento } from './data/relevamientos.js';
+import { backendRequest } from './data/backendApi.js';
 
 const LOCALIDADES_OPTIONS = ['Villa Gesell', 'Mar de las Pampas', 'Mar Azul', 'Las Gaviotas', 'Colonia Marina'];
 const OFICINAS_OPTIONS = ['Centro', 'Mar de las Pampas', 'Norte', 'Terminal'];
 
 export default function Alojamientos() {
-  const { supabase, canEditRelevamientos, canEditAlojamientos, user, isAdmin } = useAuth();
+  const { dataClient, supabase, canEditRelevamientos, canEditAlojamientos, user, isAdmin } = useAuth();
   const [tab, setTab] = useState('relevamiento');
 
   // —— Relevamiento tab state ——
@@ -35,7 +36,7 @@ export default function Alojamientos() {
   const [form, setForm] = useState({});
 
   const loadFechas = () => {
-    getRelevamientoFechas(supabase)
+    getRelevamientoFechas(dataClient)
       .then((arr) => {
         setFechas(arr);
         if (arr.length && (!fecha || !arr.includes(fecha))) setFecha(arr[0]);
@@ -49,7 +50,7 @@ export default function Alojamientos() {
     setLoading(true);
     setError('');
     setSuccess('');
-    getRelevamiento(supabase, fecha, isAdmin)
+    getRelevamiento(dataClient, fecha, isAdmin)
       .then(setData)
       .catch(() => setError('Error al cargar relevamiento'))
       .finally(() => setLoading(false));
@@ -58,6 +59,11 @@ export default function Alojamientos() {
   const loadList = async () => {
     setListLoading(true);
     try {
+      if (dataClient?._backend) {
+        const data = await backendRequest(dataClient, '/api/alojamientos');
+        setList(Array.isArray(data) ? data : []);
+        return;
+      }
       let q = supabase.from('alojamientos').select('*').order('prestador');
       if (!isAdmin) q = q.or('oculto.is.null,oculto.eq.0');
       const { data, error } = await q;
@@ -103,11 +109,11 @@ export default function Alojamientos() {
       oficina: r.oficina ?? a.oficina ?? null,
     };
     try {
-      await saveRelevamiento(supabase, body, user?.nombre);
+      await saveRelevamiento(dataClient, body, user?.nombre);
       setSuccess('Guardado');
       setTimeout(() => setSuccess(''), 2500);
       loadFechas();
-      const next = await getRelevamiento(supabase, fecha, isAdmin);
+      const next = await getRelevamiento(dataClient, fecha, isAdmin);
       setData(next);
     } catch (err) {
       setError(err.message || 'Error al guardar');
@@ -150,10 +156,10 @@ export default function Alojamientos() {
     setCopyingId(alojamientoId);
     setError('');
     try {
-      await copiarUltimoRelevamiento(supabase, fecha, alojamientoId, user?.nombre);
+      await copiarUltimoRelevamiento(dataClient, fecha, alojamientoId, user?.nombre);
       setSuccess('Dato del último relevamiento copiado.');
       setTimeout(() => setSuccess(''), 2500);
-      const next = await getRelevamiento(supabase, fecha, isAdmin);
+      const next = await getRelevamiento(dataClient, fecha, isAdmin);
       setData(next);
       loadFechas();
     } catch (err) {
@@ -230,12 +236,20 @@ export default function Alojamientos() {
       oficina: form.oficina || null,
     };
     try {
-      if (editing === 'new') {
-        const { error } = await supabase.from('alojamientos').insert(row);
-        if (error) throw error;
+      if (dataClient?._backend) {
+        if (editing === 'new') {
+          await backendRequest(dataClient, '/api/alojamientos', { method: 'POST', body: JSON.stringify(row) });
+        } else {
+          await backendRequest(dataClient, `/api/alojamientos/${editing}`, { method: 'PUT', body: JSON.stringify(row) });
+        }
       } else {
-        const { error } = await supabase.from('alojamientos').update(row).eq('id', editing);
-        if (error) throw error;
+        if (editing === 'new') {
+          const { error } = await supabase.from('alojamientos').insert(row);
+          if (error) throw error;
+        } else {
+          const { error } = await supabase.from('alojamientos').update(row).eq('id', editing);
+          if (error) throw error;
+        }
       }
       cancelEdit();
       loadList();
@@ -245,10 +259,20 @@ export default function Alojamientos() {
   };
   const remove = async (id) => {
     if (!window.confirm('¿Eliminar este alojamiento?')) return;
+    if (dataClient?._backend) {
+      await backendRequest(dataClient, `/api/alojamientos/${id}`, { method: 'DELETE' });
+      loadList();
+      return;
+    }
     const { error } = await supabase.from('alojamientos').delete().eq('id', id);
     if (!error) loadList();
   };
   const toggleOculto = async (a) => {
+    if (dataClient?._backend) {
+      await backendRequest(dataClient, `/api/alojamientos/${a.id}`, { method: 'PUT', body: JSON.stringify({ ...a, oculto: a.oculto ? 0 : 1 }) });
+      loadList();
+      return;
+    }
     const { error } = await supabase.from('alojamientos').update({ oculto: a.oculto ? 0 : 1 }).eq('id', a.id);
     if (!error) loadList();
   };
@@ -296,13 +320,13 @@ export default function Alojamientos() {
                         type="checkbox"
                         checked={soloAsignado}
                         onChange={(e) => setSoloAsignado(e.target.checked)}
-                        disabled={!user?.oficina}
+                        disabled={!user?.oficina && !isAdmin}
                         aria-describedby="filter-ver-mis-hint"
                       />
-                      <span>{user?.oficina ? 'Solo mi oficina' : 'Sin oficina asignada'}</span>
+                      <span>{isAdmin ? 'Todas las oficinas' : (user?.oficina ? 'Solo mi oficina' : 'Sin oficina asignada')}</span>
                     </label>
                     <span id="filter-ver-mis-hint" className="filter-bar__hint">
-                      {user?.oficina ? 'Filtrar por la oficina asignada al agente' : 'Asigná una oficina en Admin para usar este filtro'}
+                      {isAdmin ? 'Admin ve todos los alojamientos sin filtrar por oficina' : (user?.oficina ? 'Filtrar por la oficina asignada al agente' : 'Asigná una oficina en Admin para usar este filtro')}
                     </span>
                   </div>
                 </div>

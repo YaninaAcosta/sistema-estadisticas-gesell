@@ -1,7 +1,11 @@
 /**
- * Acceso a relevamientos (alojamientos) vía Supabase. Reemplaza las llamadas al backend.
+ * Acceso a relevamientos (alojamientos) vía Supabase o backend (cuando dataClient._backend).
  */
-export async function getRelevamientoFechas(supabase) {
+import { backendRequest } from './backendApi.js';
+
+export async function getRelevamientoFechas(client) {
+  if (client?._backend) return backendRequest(client, '/api/relevamientos/fechas');
+  const supabase = client;
   const [resRelev, resConfig] = await Promise.all([
     supabase.from('relevamientos').select('fecha').order('fecha', { ascending: false }).limit(100),
     supabase.from('relevamiento_config').select('fecha'),
@@ -13,7 +17,9 @@ export async function getRelevamientoFechas(supabase) {
   return [...set].sort((a, b) => b.localeCompare(a)).slice(0, 80);
 }
 
-export async function getRelevamiento(supabase, fecha, isAdmin) {
+export async function getRelevamiento(client, fecha, isAdmin) {
+  if (client?._backend) return backendRequest(client, `/api/relevamientos?fecha=${encodeURIComponent(fecha)}`);
+  const supabase = client;
   const { data: configRow } = await supabase.from('relevamiento_config').select('*').eq('fecha', fecha).maybeSingle();
   const config = configRow || { consultar_ocupacion: 1, consultar_reservas: 0 };
   let qAloj = supabase.from('alojamientos').select('*').order('prestador');
@@ -41,7 +47,14 @@ export async function getRelevamiento(supabase, fecha, isAdmin) {
   return { fecha, config: { consultar_ocupacion: !!config.consultar_ocupacion, consultar_reservas: !!config.consultar_reservas }, list };
 }
 
-export async function saveRelevamiento(supabase, body, agenteNombre) {
+export async function saveRelevamiento(client, body, agenteNombre) {
+  if (client?._backend) {
+    return backendRequest(client, '/api/relevamientos', {
+      method: 'POST',
+      body: JSON.stringify({ ...body, agente: agenteNombre }),
+    });
+  }
+  const supabase = client;
   const { fecha, alojamiento_id, plazas_ocupadas_anterior, plazas_ocupadas, reservas, disponibilidad_texto, llamados, observaciones, oficina } = body;
   const { data: aloj } = await supabase.from('alojamientos').select('plazas_totales, oficina').eq('id', alojamiento_id).maybeSingle();
   const plazasTotales = aloj?.plazas_totales ?? null;
@@ -74,7 +87,14 @@ export async function saveRelevamiento(supabase, body, agenteNombre) {
   return data;
 }
 
-export async function copiarUltimoRelevamiento(supabase, fecha, alojamientoId, agenteNombre) {
+export async function copiarUltimoRelevamiento(client, fecha, alojamientoId, agenteNombre) {
+  if (client?._backend) {
+    return backendRequest(client, '/api/relevamientos/copiar-ultimo', {
+      method: 'POST',
+      body: JSON.stringify({ fecha, alojamiento_id: alojamientoId }),
+    });
+  }
+  const supabase = client;
   const { data: ultimaList } = await supabase.from('relevamientos').select('fecha').order('fecha', { ascending: false }).limit(1);
   const ultima = ultimaList?.[0]?.fecha;
   if (!ultima) throw new Error('No hay relevamientos previos para copiar');

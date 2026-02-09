@@ -56,7 +56,7 @@ app.use(cors(corsOptions));
 app.use(express.json());
 
 // —— Auth ——
-import { comparePassword, createToken, findUserByEmail } from './auth.js';
+import { comparePassword, createToken, findUserByEmail, getPermissionsForRole } from './auth.js';
 
 app.post('/api/auth/login', async (req, res, next) => {
   try {
@@ -64,8 +64,19 @@ app.post('/api/auth/login', async (req, res, next) => {
     if (!email || !password) return res.status(400).json({ error: 'Email y contraseña requeridos' });
     const user = await findUserByEmail(email);
     if (!user || !comparePassword(password, user.password_hash)) return res.status(401).json({ error: 'Credenciales incorrectas' });
+    const permissions = user.rol === 'admin' ? PERMISSIONS.map((p) => p.key) : (await getPermissionsForRole(user.rol));
     const token = createToken(user);
-    res.json({ token, user: { id: user.id, email: user.email, nombre: user.nombre, rol: user.rol } });
+    res.json({
+      token,
+      user: {
+        id: user.id,
+        email: user.email,
+        nombre: user.nombre,
+        rol: user.rol,
+        oficina: parseOficina(user.oficina),
+        permissions: permissions || [],
+      },
+    });
   } catch (e) { next(e); }
 });
 
@@ -74,7 +85,7 @@ app.get('/api/auth/me', authMiddleware, async (req, res, next) => {
     const { data: user, error } = await supabase.from('users').select('id, email, nombre, rol, oficina').eq('id', req.user.id).maybeSingle();
     if (error) throw error;
     if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
-    const permissions = await getPermissionsForRole(user.rol);
+    const permissions = user.rol === 'admin' ? PERMISSIONS.map((p) => p.key) : (await getPermissionsForRole(user.rol));
     res.json({ ...user, oficina: parseOficina(user.oficina), permissions });
   } catch (e) { next(e); }
 });

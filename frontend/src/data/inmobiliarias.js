@@ -1,8 +1,11 @@
 /**
- * Helpers para relevamiento inmobiliarias (solo Supabase).
+ * Helpers para relevamiento inmobiliarias (Supabase o backend).
  */
+import { backendRequest } from './backendApi.js';
 
-export async function getRelevamientoInmobFechas(supabase) {
+export async function getRelevamientoInmobFechas(client) {
+  if (client?._backend) return backendRequest(client, '/api/relevamiento-inmobiliarias/fechas');
+  const supabase = client;
   const [resRelev, resConfig] = await Promise.all([
     supabase.from('relevamiento_inmobiliarias').select('fecha').order('fecha', { ascending: false }).limit(100),
     supabase.from('inmobiliarias_config').select('fecha'),
@@ -14,7 +17,9 @@ export async function getRelevamientoInmobFechas(supabase) {
   return [...set].sort((a, b) => b.localeCompare(a)).slice(0, 80);
 }
 
-export async function getRelevamientoInmob(supabase, fecha, isAdmin) {
+export async function getRelevamientoInmob(client, fecha, isAdmin) {
+  if (client?._backend) return backendRequest(client, `/api/relevamiento-inmobiliarias?fecha=${encodeURIComponent(fecha)}`);
+  const supabase = client;
   let qInm = supabase.from('inmobiliarias').select('*').order('prestador');
   if (!isAdmin) qInm = qInm.or('oculto.is.null,oculto.eq.0');
   const [resInm, resRelev] = await Promise.all([
@@ -29,7 +34,14 @@ export async function getRelevamientoInmob(supabase, fecha, isAdmin) {
   return { fecha, list: (inmobiliarias || []).map((i) => ({ inmobiliaria: i, relevamiento: byInmob[i.id] || null })) };
 }
 
-export async function saveRelevamientoInmob(supabase, payload, agenteNombre) {
+export async function saveRelevamientoInmob(client, payload, agenteNombre) {
+  if (client?._backend) {
+    return backendRequest(client, '/api/relevamiento-inmobiliarias', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+  const supabase = client;
   const od = payload.ocupacion_dptos_pct != null ? Math.min(100, Math.max(0, Number(payload.ocupacion_dptos_pct))) : null;
   const oc = payload.ocupacion_casas_pct != null ? Math.min(100, Math.max(0, Number(payload.ocupacion_casas_pct))) : null;
   const row = {

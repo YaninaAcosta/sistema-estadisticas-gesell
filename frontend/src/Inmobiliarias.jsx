@@ -3,13 +3,14 @@ import { useAuth } from './AuthContext';
 import Contacto from './components/Contacto';
 import Modal from './components/Modal';
 import { getRelevamientoInmobFechas, getRelevamientoInmob, saveRelevamientoInmob } from './data/inmobiliarias.js';
+import { backendRequest } from './data/backendApi.js';
 
 const LOCALIDADES_OPTIONS = ['Villa Gesell', 'Mar de las Pampas', 'Mar Azul', 'Las Gaviotas', 'Colonia Marina'];
 const OFICINAS_OPTIONS = ['Centro', 'Mar de las Pampas', 'Norte', 'Terminal'];
 const LLAMADOS_OPTIONS = ['Envié WhatsApp', 'Llamado', 'No llama', 'Sin contacto'];
 
 export default function Inmobiliarias() {
-  const { supabase, user, canEditInmobiliarias, isAdmin } = useAuth();
+  const { dataClient, supabase, user, canEditInmobiliarias, isAdmin } = useAuth();
   const [tab, setTab] = useState('relevamiento');
   const [fechas, setFechas] = useState([]);
   const [fecha, setFecha] = useState('');
@@ -44,7 +45,7 @@ export default function Inmobiliarias() {
   };
 
   const loadFechas = () => {
-    getRelevamientoInmobFechas(supabase)
+    getRelevamientoInmobFechas(dataClient)
       .then((arr) => {
         setFechas(arr);
         if (arr.length && (!fecha || !arr.includes(fecha))) setFecha(arr[0]);
@@ -60,7 +61,7 @@ export default function Inmobiliarias() {
       return;
     }
     setLoading(true);
-    getRelevamientoInmob(supabase, fecha, isAdmin)
+    getRelevamientoInmob(dataClient, fecha, isAdmin)
       .then(setData)
       .catch(() => setError('Error al cargar'))
       .finally(() => setLoading(false));
@@ -69,11 +70,16 @@ export default function Inmobiliarias() {
   const loadList = async () => {
     setListLoading(true);
     try {
-      let q = supabase.from('inmobiliarias').select('*').order('prestador');
-      if (!isAdmin) q = q.or('oculto.is.null,oculto.eq.0');
-      const { data, error } = await q;
-      if (error) throw error;
-      setList(data || []);
+      if (dataClient?._backend) {
+        const data = await backendRequest(dataClient, '/api/inmobiliarias');
+        setList(Array.isArray(data) ? data : []);
+      } else {
+        let q = supabase.from('inmobiliarias').select('*').order('prestador');
+        if (!isAdmin) q = q.or('oculto.is.null,oculto.eq.0');
+        const { data, error } = await q;
+        if (error) throw error;
+        setList(data || []);
+      }
     } catch {
       setError('Error al cargar');
     } finally {
@@ -99,7 +105,7 @@ export default function Inmobiliarias() {
       oficina: field === 'oficina' ? value : (r.oficina ?? item.inmobiliaria?.oficina ?? null),
     };
     try {
-      const updated = await saveRelevamientoInmob(supabase, payload, user?.nombre);
+      const updated = await saveRelevamientoInmob(dataClient, payload, user?.nombre);
       setData((prev) => ({
         ...prev,
         list: prev.list.map((x) =>
@@ -146,12 +152,20 @@ export default function Inmobiliarias() {
       oficina: form.oficina || null,
     };
     try {
-      if (editing === 'new') {
-        const { error } = await supabase.from('inmobiliarias').insert(row);
-        if (error) throw error;
+      if (dataClient?._backend) {
+        if (editing === 'new') {
+          await backendRequest(dataClient, '/api/inmobiliarias', { method: 'POST', body: JSON.stringify(row) });
+        } else {
+          await backendRequest(dataClient, `/api/inmobiliarias/${editing}`, { method: 'PUT', body: JSON.stringify(row) });
+        }
       } else {
-        const { error } = await supabase.from('inmobiliarias').update(row).eq('id', editing);
-        if (error) throw error;
+        if (editing === 'new') {
+          const { error } = await supabase.from('inmobiliarias').insert(row);
+          if (error) throw error;
+        } else {
+          const { error } = await supabase.from('inmobiliarias').update(row).eq('id', editing);
+          if (error) throw error;
+        }
       }
       cancel();
       loadList();
@@ -161,10 +175,20 @@ export default function Inmobiliarias() {
   };
   const remove = async (id) => {
     if (!window.confirm('¿Eliminar esta inmobiliaria?')) return;
+    if (dataClient?._backend) {
+      await backendRequest(dataClient, `/api/inmobiliarias/${id}`, { method: 'DELETE' });
+      loadList();
+      return;
+    }
     const { error } = await supabase.from('inmobiliarias').delete().eq('id', id);
     if (!error) loadList();
   };
   const toggleOculto = async (i) => {
+    if (dataClient?._backend) {
+      await backendRequest(dataClient, `/api/inmobiliarias/${i.id}`, { method: 'PUT', body: JSON.stringify({ ...i, oculto: i.oculto ? 0 : 1 }) });
+      loadList();
+      return;
+    }
     const { error } = await supabase.from('inmobiliarias').update({ oculto: i.oculto ? 0 : 1 }).eq('id', i.id);
     if (!error) loadList();
   };
