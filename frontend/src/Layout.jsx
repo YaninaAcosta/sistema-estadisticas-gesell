@@ -12,7 +12,7 @@ export default function Layout() {
     <div className="app-layout">
       <nav className="nav">
         <a href="/" className="nav-logo">
-          <img src="/logo-gesell.png" alt="Villa Gesell" />
+          <img src={`${import.meta.env.BASE_URL}logo-gesell.png`} alt="Villa Gesell" />
         </a>
         <div className="nav-links">
           <NavLink to="/" end>Inicio</NavLink>

@@ -37,7 +37,7 @@ export default function Login() {
     <div className="login-page">
       <div className="login-box">
         <div className="login-logo">
-          <img src="/logo-gesell.png" alt="Villa Gesell" />
+          <img src={`${import.meta.env.BASE_URL}logo-gesell.png`} alt="Villa Gesell" />
         </div>
         <h1>Relevamiento de ocupación</h1>
         <p className="login-subtitle">Usuario y contraseña para ingresar</p>
