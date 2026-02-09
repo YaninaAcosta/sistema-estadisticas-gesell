@@ -50,7 +50,11 @@ const allowedOrigins = [
 function corsOptions(req, callback) {
   const origin = req.header('Origin');
   const ok = !origin || allowedOrigins.includes(origin) || /^https:\/\/[a-z0-9-]+\.github\.io$/i.test(origin);
-  callback(null, { origin: ok ? origin : false, credentials: true });
+  callback(null, {
+    origin: ok ? origin : false,
+    credentials: true,
+    allowedHeaders: ['Content-Type', 'Authorization'],
+  });
 }
 app.use(cors(corsOptions));
 app.use(express.json());
@@ -463,8 +467,11 @@ app.get('/api/relevamientos', authMiddleware, requirePermission('view_relevamien
 
 app.post('/api/relevamientos', authMiddleware, requirePermission('edit_relevamiento'), async (req, res, next) => {
   try {
-    const { fecha, alojamiento_id, plazas_ocupadas_anterior, plazas_ocupadas, reservas, disponibilidad_texto, llamados, observaciones, oficina } = req.body || {};
-    if (!fecha || !alojamiento_id) return res.status(400).json({ error: 'fecha y alojamiento_id requeridos' });
+    const body = req.body || {};
+    const { fecha, alojamiento_id, plazas_ocupadas_anterior, plazas_ocupadas, reservas, disponibilidad_texto, llamados, observaciones, oficina } = body;
+    if (fecha == null || fecha === '' || alojamiento_id == null || alojamiento_id === '') {
+      return res.status(400).json({ error: 'fecha y alojamiento_id requeridos' });
+    }
     const { data: aloj } = await supabase.from('alojamientos').select('plazas_totales, oficina').eq('id', alojamiento_id).maybeSingle();
     const plazasTotales = aloj?.plazas_totales ?? null;
     if (plazas_ocupadas != null && plazasTotales != null && Number(plazas_ocupadas) > Number(plazasTotales)) return res.status(400).json({ error: 'Las plazas ocupadas no pueden superar las plazas totales' });

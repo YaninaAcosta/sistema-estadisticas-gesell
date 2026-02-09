@@ -5,14 +5,21 @@
 export async function backendRequest(client, path, options = {}) {
   const { apiBase, token } = client;
   const url = `${apiBase}${path}`;
-  const isJsonBody = options.body != null && (typeof options.body === 'string' || (typeof options.body === 'object' && !(options.body instanceof FormData)));
+  let body = options.body;
+  if (body != null && typeof body === 'object' && !(body instanceof FormData)) {
+    body = JSON.stringify(body);
+  }
+  const hasJsonBody = body != null && (typeof body === 'string' || body instanceof FormData);
+  const headers = {
+    ...(options.headers || {}),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(hasJsonBody && typeof body === 'string' ? { 'Content-Type': 'application/json' } : {}),
+  };
   const res = await fetch(url, {
     ...options,
-    headers: {
-      ...(options.headers || {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(isJsonBody ? { 'Content-Type': 'application/json' } : {}),
-    },
+    method: options.method || 'GET',
+    headers,
+    ...(body != null ? { body } : {}),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
