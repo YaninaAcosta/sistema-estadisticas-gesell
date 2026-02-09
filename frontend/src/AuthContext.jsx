@@ -110,16 +110,32 @@ export function AuthProvider({ children }) {
         console.info('[Relevamiento Gesell] Conectando a Supabase:', supabaseUrlForDebug);
       }
       let data, error;
-      try {
+      const tryAuth = async () => {
+        const t0 = Date.now();
         const result = await supabase.auth.signInWithPassword({ email, password });
-        data = result.data;
-        error = result.error;
-      } catch (err) {
-        const msg = err?.message || '';
-        if (msg.includes('fetch') || msg.includes('network') || msg.includes('Failed')) {
-          throw new Error('No se pudo conectar con Supabase. Revisá que VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY en GitHub Secrets sean del mismo proyecto y estén bien copiados.');
+        if (typeof window !== 'undefined') {
+          console.info('[Relevamiento Gesell] Auth:', Date.now() - t0, 'ms');
         }
-        throw err;
+        return result;
+      };
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const result = await tryAuth();
+          data = result.data;
+          error = result.error;
+          break;
+        } catch (err) {
+          const msg = err?.message || '';
+          const isNetwork = /fetch|network|Failed|timeout/i.test(msg);
+          if (isNetwork && attempt === 0) {
+            await new Promise((r) => setTimeout(r, 1500));
+            continue;
+          }
+          if (msg.includes('fetch') || msg.includes('network') || msg.includes('Failed')) {
+            throw new Error('No se pudo conectar con Supabase. Revisá que VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY en GitHub Secrets sean del mismo proyecto y estén bien copiados.');
+          }
+          throw err;
+        }
       }
       if (error) throw new Error(error.message || 'Error al iniciar sesión');
 
@@ -135,6 +151,7 @@ export function AuthProvider({ children }) {
       setUser(stubUser);
 
       const loadProfile = async () => {
+        const t0 = Date.now();
         let fullUser = null;
         try {
           fullUser = await Promise.race([
@@ -144,6 +161,9 @@ export function AuthProvider({ children }) {
         } catch (_) {}
         if (fullUser == null) {
           fullUser = await fetchProfileAndPermissionsFallback(data.user.id);
+        }
+        if (typeof window !== 'undefined') {
+          console.info('[Relevamiento Gesell] Perfil:', Date.now() - t0, 'ms');
         }
         if (!fullUser) {
           await supabase.auth.signOut();
