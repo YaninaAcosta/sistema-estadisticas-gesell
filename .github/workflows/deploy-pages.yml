@@ -21,6 +21,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Verificar secrets de Supabase
+        run: |
+          if [ -z "${{ secrets.VITE_SUPABASE_URL }}" ] || [ -z "${{ secrets.VITE_SUPABASE_ANON_KEY }}" ]; then
+            echo "::error::Faltan Repository Secrets. En el repo: Settings → Secrets and variables → Actions → New repository secret."
+            echo "Creá exactamente: VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY (nombres tal cual, sensibles a mayúsculas)."
+            exit 1
+          fi
+          echo "Secrets OK"
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
