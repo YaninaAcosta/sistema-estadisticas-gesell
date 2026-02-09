@@ -5,6 +5,16 @@ import App from './App';
 import { AuthProvider } from './AuthContext';
 import './index.css';
 
+const basePath = (import.meta.env.VITE_BASE_PATH || import.meta.env.BASE_URL || '/').replace(/\/$/, '');
+if (typeof window !== 'undefined' && basePath) {
+  const pathname = window.location.pathname;
+  const pathNorm = basePath.replace(/\/$/, '');
+  if (pathname !== pathNorm && pathname !== pathNorm + '/' && pathname.startsWith(pathNorm + '/')) {
+    const route = pathname.slice(pathNorm.length).replace(/^\//, '') || '';
+    window.location.replace(window.location.origin + pathNorm + '/#' + (route ? '/' + route : ''));
+  }
+}
+
 class ErrorBoundary extends React.Component {
   state = { error: null };
   static getDerivedStateFromError(err) {
