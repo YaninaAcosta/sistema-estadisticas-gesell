@@ -82,9 +82,7 @@ export default function Login() {
               {loading ? 'Conectando…' : 'Entrar'}
             </button>
           </div>
-          {loading && (
-            <p className="login-loading-hint">Puede tardar unos segundos según tu conexión.</p>
-          )}
+          {loading && <p className="login-loading-hint">Conectando…</p>}
         </form>
         <p className="login-hint">
           Usuario y contraseña que te asignaron. Ej: admin / gesell123
