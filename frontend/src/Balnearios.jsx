@@ -2,13 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from './AuthContext';
 import Contacto from './components/Contacto';
 import Modal from './components/Modal';
+import { getRelevamientoBalnFechas, getRelevamientoBaln, saveRelevamientoBaln } from './data/balnearios.js';
 
 const LOCALIDADES_OPTIONS = ['Villa Gesell', 'Mar de las Pampas', 'Mar Azul', 'Las Gaviotas', 'Colonia Marina'];
 const OFICINAS_OPTIONS = ['Centro', 'Mar de las Pampas', 'Norte', 'Terminal'];
 const LLAMADOS_OPTIONS = ['Envié WhatsApp', 'Llamado', 'No llama', 'Sin contacto', 'Tel fijo'];
 
 export default function Balnearios() {
-  const { api, canEditBalnearios, isAdmin } = useAuth();
+  const { supabase, user, canEditBalnearios, isAdmin } = useAuth();
   const [tab, setTab] = useState('relevamiento');
   const [fechas, setFechas] = useState([]);
   const [fecha, setFecha] = useState('');
@@ -42,10 +43,8 @@ export default function Balnearios() {
   };
 
   const loadFechas = () => {
-    api('/relevamiento-balnearios/fechas')
-      .then((r) => r.json())
-      .then((list) => {
-        const arr = Array.isArray(list) ? list : [];
+    getRelevamientoBalnFechas(supabase)
+      .then((arr) => {
         setFechas(arr);
         if (arr.length && (!fecha || !arr.includes(fecha))) setFecha(arr[0]);
       })
@@ -60,16 +59,25 @@ export default function Balnearios() {
       return;
     }
     setLoading(true);
-    api(`/relevamiento-balnearios?fecha=${fecha}`)
-      .then((r) => r.json())
+    getRelevamientoBaln(supabase, fecha, isAdmin)
       .then(setData)
       .catch(() => setError('Error al cargar'))
       .finally(() => setLoading(false));
   }, [fecha]);
 
-  const loadList = () => {
+  const loadList = async () => {
     setListLoading(true);
-    api('/balnearios').then((r) => r.json()).then(setList).catch(() => setError('Error al cargar')).finally(() => setListLoading(false));
+    try {
+      let q = supabase.from('balnearios').select('*').order('prestador');
+      if (!isAdmin) q = q.or('oculto.is.null,oculto.eq.0');
+      const { data, error } = await q;
+      if (error) throw error;
+      setList(data || []);
+    } catch {
+      setError('Error al cargar');
+    } finally {
+      setListLoading(false);
+    }
   };
   useEffect(() => {
     if (tab === 'listado') loadList();
@@ -88,16 +96,16 @@ export default function Balnearios() {
       observaciones: field === 'observaciones' ? value : (r.observaciones ?? null),
       oficina: field === 'oficina' ? value : (r.oficina ?? item.balneario?.oficina ?? null),
     };
-    const res = await api('/relevamiento-balnearios', { method: 'POST', body: JSON.stringify(payload) });
-    setSaving(null);
-    if (res.ok) {
-      const updated = await res.json();
+    try {
+      const updated = await saveRelevamientoBaln(supabase, payload, user?.nombre);
       setData((prev) => ({
         ...prev,
         list: prev.list.map((x) =>
           x.balneario.id === balnearioId ? { ...x, relevamiento: updated } : x
         ),
       }));
+    } finally {
+      setSaving(null);
     }
   };
 
@@ -126,28 +134,36 @@ export default function Balnearios() {
   };
   const cancel = () => { setEditing(null); setError(''); };
   const doSave = async () => {
-    const body = { ...form, direccion: form.direccion || null, telefono_fijo: form.telefono_fijo || null, whatsapp: form.whatsapp || null, oficina: form.oficina || null };
-    if (editing === 'new') {
-      const res = await api('/balnearios', { method: 'POST', body: JSON.stringify(body) });
-      if (!res.ok) { const d = await res.json().catch(() => ({})); setError(d.error || 'Error al crear'); return; }
-    } else {
-      const res = await api(`/balnearios/${editing}`, { method: 'PUT', body: JSON.stringify(body) });
-      if (!res.ok) { const d = await res.json().catch(() => ({})); setError(d.error || 'Error al guardar'); return; }
+    const row = {
+      localidad: form.localidad || 'Villa Gesell',
+      prestador: form.prestador || '',
+      direccion: form.direccion || null,
+      telefono_fijo: form.telefono_fijo || null,
+      whatsapp: form.whatsapp || null,
+      oficina: form.oficina || null,
+    };
+    try {
+      if (editing === 'new') {
+        const { error } = await supabase.from('balnearios').insert(row);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from('balnearios').update(row).eq('id', editing);
+        if (error) throw error;
+      }
+      cancel();
+      loadList();
+    } catch (err) {
+      setError(err.message || (editing === 'new' ? 'Error al crear' : 'Error al guardar'));
     }
-    cancel();
-    loadList();
   };
   const remove = async (id) => {
     if (!window.confirm('¿Eliminar este balneario?')) return;
-    const res = await api(`/balnearios/${id}`, { method: 'DELETE' });
-    if (res.ok) loadList();
+    const { error } = await supabase.from('balnearios').delete().eq('id', id);
+    if (!error) loadList();
   };
   const toggleOculto = async (i) => {
-    const res = await api(`/balnearios/${i.id}`, {
-      method: 'PUT',
-      body: JSON.stringify({ ...i, oculto: !i.oculto }),
-    });
-    if (res.ok) loadList();
+    const { error } = await supabase.from('balnearios').update({ oculto: i.oculto ? 0 : 1 }).eq('id', i.id);
+    if (!error) loadList();
   };
 
   return (

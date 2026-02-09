@@ -3,12 +3,13 @@ import { useAuth } from './AuthContext';
 import Contacto from './components/Contacto';
 import Modal from './components/Modal';
 import { CATEGORIAS_OPTIONS, normalizeCategoriaDisplay } from './utils/categoria';
+import { getRelevamientoFechas, getRelevamiento, saveRelevamiento, copiarUltimoRelevamiento } from './data/relevamientos.js';
 
 const LOCALIDADES_OPTIONS = ['Villa Gesell', 'Mar de las Pampas', 'Mar Azul', 'Las Gaviotas', 'Colonia Marina'];
 const OFICINAS_OPTIONS = ['Centro', 'Mar de las Pampas', 'Norte', 'Terminal'];
 
 export default function Alojamientos() {
-  const { api, canEditRelevamientos, canEditAlojamientos, user, isAdmin } = useAuth();
+  const { supabase, canEditRelevamientos, canEditAlojamientos, user, isAdmin } = useAuth();
   const [tab, setTab] = useState('relevamiento');
 
   // —— Relevamiento tab state ——
@@ -34,12 +35,9 @@ export default function Alojamientos() {
   const [form, setForm] = useState({});
 
   const loadFechas = () => {
-    api('/relevamientos/fechas')
-      .then((r) => r.json())
-      .then((list) => {
-        setFechas(Array.isArray(list) ? list : []);
-        const arr = Array.isArray(list) ? list : [];
-        // Siempre mostrar el último relevamiento lanzado (primera fecha = la más reciente)
+    getRelevamientoFechas(supabase)
+      .then((arr) => {
+        setFechas(arr);
         if (arr.length && (!fecha || !arr.includes(fecha))) setFecha(arr[0]);
       })
       .catch(() => setError('Error al cargar fechas'));
@@ -51,16 +49,25 @@ export default function Alojamientos() {
     setLoading(true);
     setError('');
     setSuccess('');
-    api(`/relevamientos?fecha=${fecha}`)
-      .then((r) => r.json())
+    getRelevamiento(supabase, fecha, isAdmin)
       .then(setData)
       .catch(() => setError('Error al cargar relevamiento'))
       .finally(() => setLoading(false));
   }, [fecha, tab]);
 
-  const loadList = () => {
+  const loadList = async () => {
     setListLoading(true);
-    api('/alojamientos').then((r) => r.json()).then(setList).catch(() => setError('Error al cargar alojamientos')).finally(() => setListLoading(false));
+    try {
+      let q = supabase.from('alojamientos').select('*').order('prestador');
+      if (!isAdmin) q = q.or('oculto.is.null,oculto.eq.0');
+      const { data, error } = await q;
+      if (error) throw error;
+      setList(data || []);
+    } catch {
+      setError('Error al cargar alojamientos');
+    } finally {
+      setListLoading(false);
+    }
   };
   useEffect(() => { if (tab === 'listado') loadList(); }, [tab]);
 
@@ -95,17 +102,17 @@ export default function Alojamientos() {
       observaciones: r.observaciones ?? null,
       oficina: r.oficina ?? a.oficina ?? null,
     };
-    const res = await api('/relevamientos', { method: 'POST', body: JSON.stringify(body) });
-    setSaving(null);
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      setError(err.error || 'Error al guardar');
-    } else {
+    try {
+      await saveRelevamiento(supabase, body, user?.nombre);
       setSuccess('Guardado');
       setTimeout(() => setSuccess(''), 2500);
+      loadFechas();
+      const next = await getRelevamiento(supabase, fecha, isAdmin);
+      setData(next);
+    } catch (err) {
+      setError(err.message || 'Error al guardar');
     }
-    loadFechas();
-    api(`/relevamientos?fecha=${fecha}`).then((res) => res.json()).then(setData);
+    setSaving(null);
   };
 
   const localidadesFromData = [...new Set(data.list.map((i) => i.alojamiento?.localidad).filter(Boolean))];
@@ -142,13 +149,17 @@ export default function Alojamientos() {
     if (!fecha) return;
     setCopyingId(alojamientoId);
     setError('');
-    const res = await api('/relevamientos/copiar-ultimo', { method: 'POST', body: JSON.stringify({ fecha, alojamiento_id: alojamientoId }) });
+    try {
+      await copiarUltimoRelevamiento(supabase, fecha, alojamientoId, user?.nombre);
+      setSuccess('Dato del último relevamiento copiado.');
+      setTimeout(() => setSuccess(''), 2500);
+      const next = await getRelevamiento(supabase, fecha, isAdmin);
+      setData(next);
+      loadFechas();
+    } catch (err) {
+      setError(err.message || 'Error al copiar');
+    }
     setCopyingId(null);
-    if (!res.ok) { const d = await res.json().catch(() => ({})); setError(d.error || 'Error al copiar'); return; }
-    setSuccess('Dato del último relevamiento copiado.');
-    setTimeout(() => setSuccess(''), 2500);
-    api(`/relevamientos?fecha=${fecha}`).then((r) => r.json()).then(setData);
-    loadFechas();
   };
 
   const exportCSV = () => {
@@ -204,50 +215,42 @@ export default function Alojamientos() {
   };
   const cancelEdit = () => { setEditing(null); setError(''); };
   const doSave = async () => {
-    const body = {
-      ...form,
+    const row = {
+      localidad: form.localidad || 'Villa Gesell',
       categoria: (form.categoria && String(form.categoria).trim()) ? String(form.categoria).trim() : null,
+      prestador: form.prestador || '',
+      web: form.pagina_web || null,
       funcionamiento: form.funcionamiento || null,
       observaciones: form.observaciones || null,
+      direccion: form.direccion || null,
+      telefono_fijo: form.telefono_fijo || null,
+      whatsapp: form.whatsapp || null,
       pagina_web: form.pagina_web || null,
       plazas_totales: form.plazas_totales === '' ? null : Number(form.plazas_totales),
       oficina: form.oficina || null,
     };
-    if (editing === 'new') {
-      const res = await api('/alojamientos', { method: 'POST', body: JSON.stringify(body) });
-      if (!res.ok) { const d = await res.json().catch(() => ({})); setError(d.error || 'Error al crear'); return; }
-    } else {
-      const res = await api(`/alojamientos/${editing}`, { method: 'PUT', body: JSON.stringify(body) });
-      if (!res.ok) { const d = await res.json().catch(() => ({})); setError(d.error || 'Error al guardar'); return; }
+    try {
+      if (editing === 'new') {
+        const { error } = await supabase.from('alojamientos').insert(row);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from('alojamientos').update(row).eq('id', editing);
+        if (error) throw error;
+      }
+      cancelEdit();
+      loadList();
+    } catch (err) {
+      setError(err.message || (editing === 'new' ? 'Error al crear' : 'Error al guardar'));
     }
-    cancelEdit();
-    loadList();
   };
   const remove = async (id) => {
     if (!window.confirm('¿Eliminar este alojamiento?')) return;
-    const res = await api(`/alojamientos/${id}`, { method: 'DELETE' });
-    if (res.ok) loadList();
+    const { error } = await supabase.from('alojamientos').delete().eq('id', id);
+    if (!error) loadList();
   };
   const toggleOculto = async (a) => {
-    const res = await api(`/alojamientos/${a.id}`, {
-      method: 'PUT',
-      body: JSON.stringify({
-        localidad: a.localidad,
-        categoria: a.categoria,
-        prestador: a.prestador,
-        web: a.web || null,
-        funcionamiento: a.funcionamiento || null,
-        observaciones: a.observaciones || null,
-        direccion: a.direccion || null,
-        telefono_fijo: a.telefono_fijo || null,
-        whatsapp: a.whatsapp || null,
-        pagina_web: a.pagina_web || null,
-        plazas_totales: a.plazas_totales ?? null,
-        oficina: a.oficina || null,
-        oculto: !a.oculto,
-      }),
-    });
-    if (res.ok) loadList();
+    const { error } = await supabase.from('alojamientos').update({ oculto: a.oculto ? 0 : 1 }).eq('id', a.id);
+    if (!error) loadList();
   };
 
   return (

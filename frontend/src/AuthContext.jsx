@@ -1,84 +1,96 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { supabase } from './supabase.js';
 
 const AuthContext = createContext(null);
 
-const TOKEN_KEY = 'relevamiento_token';
-const USER_KEY = 'relevamiento_user';
+function parseOficina(val) {
+  if (val == null || val === '') return null;
+  if (typeof val === 'string' && val.startsWith('[')) {
+    try {
+      const arr = JSON.parse(val);
+      return Array.isArray(arr) ? arr : [val];
+    } catch (_) { return [val]; }
+  }
+  return val;
+}
+
+async function fetchProfileAndPermissions(userId) {
+  const { data: profile, error: e1 } = await supabase
+    .from('profiles')
+    .select('id, email, nombre, rol, oficina')
+    .eq('id', userId)
+    .single();
+  if (e1 || !profile) return null;
+  const { data: perms } = await supabase
+    .from('role_permissions')
+    .select('permission')
+    .eq('rol', profile.rol);
+  const permissions = (perms || []).map((r) => r.permission);
+  return {
+    ...profile,
+    oficina: parseOficina(profile.oficina),
+    permissions,
+  };
+}
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  const apiBase = import.meta.env.VITE_API_URL || '';
-  const api = (path, options = {}) => {
-    const token = localStorage.getItem(TOKEN_KEY);
-    return fetch(`${apiBase}/api${path}`, {
-      ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token && { Authorization: `Bearer ${token}` }),
-        ...options.headers,
-      },
-    });
-  };
-
   useEffect(() => {
-    const token = localStorage.getItem(TOKEN_KEY);
-    const saved = localStorage.getItem(USER_KEY);
-    if (!token || !saved) {
-      setLoading(false);
-      return;
-    }
-    api('/auth/me')
-      .then((r) => (r.ok ? r.json() : Promise.reject()))
-      .then((u) => setUser(u))
-      .catch(() => {
-        localStorage.removeItem(TOKEN_KEY);
-        localStorage.removeItem(USER_KEY);
-      })
-      .finally(() => setLoading(false));
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!session?.user) {
+        setLoading(false);
+        return;
+      }
+      fetchProfileAndPermissions(session.user.id)
+        .then(setUser)
+        .catch(() => setUser(null))
+        .finally(() => setLoading(false));
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === 'SIGNED_OUT') {
+        setUser(null);
+        return;
+      }
+      if (session?.user) {
+        const u = await fetchProfileAndPermissions(session.user.id);
+        setUser(u);
+      }
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
   const login = async (email, password) => {
-    const res = await api('/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({ email, password }),
-    });
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      throw new Error(data.error || 'Error al iniciar sesión');
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) throw new Error(error.message || 'Error al iniciar sesión');
+    const fullUser = await fetchProfileAndPermissions(data.user.id);
+    if (!fullUser) {
+      await supabase.auth.signOut();
+      throw new Error('No se encontró tu perfil. Ejecutá en Supabase (SQL Editor) el INSERT en la tabla profiles con tu User UID de Authentication → Users.');
     }
-    const { token, user: u } = await res.json();
-    localStorage.setItem(TOKEN_KEY, token);
-    localStorage.setItem(USER_KEY, JSON.stringify(u));
-    const meRes = await api('/auth/me');
-    if (meRes.ok) {
-      const fullUser = await meRes.json();
-      setUser(fullUser);
-      localStorage.setItem(USER_KEY, JSON.stringify(fullUser));
-      return fullUser;
-    }
-    setUser(u);
-    return u;
+    setUser(fullUser);
+    return fullUser;
   };
 
   const logout = () => {
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(USER_KEY);
+    supabase.auth.signOut();
     setUser(null);
   };
 
   const permissions = user?.permissions || [];
-  const canEditAlojamientos = permissions.includes('edit_alojamientos');
-  const canEditRelevamientos = permissions.includes('edit_relevamiento');
-  const canLaunchRelevamiento = permissions.includes('launch_relevamiento');
-  const canManageUsers = permissions.includes('manage_users');
-  const canViewInmobiliarias = permissions.includes('view_inmobiliarias');
-  const canEditInmobiliarias = permissions.includes('edit_inmobiliarias');
-  const canLaunchInmobiliarias = permissions.includes('launch_inmobiliarias');
-  const canViewBalnearios = permissions.includes('view_balnearios');
-  const canEditBalnearios = permissions.includes('edit_balnearios');
-  const canLaunchBalnearios = permissions.includes('launch_balnearios');
+  const canEditAlojamientos = user?.rol === 'admin' || permissions.includes('edit_alojamientos');
+  const canEditRelevamientos = user?.rol === 'admin' || permissions.includes('edit_relevamiento');
+  const canLaunchRelevamiento = user?.rol === 'admin' || permissions.includes('launch_relevamiento');
+  const canManageUsers = user?.rol === 'admin' || permissions.includes('manage_users');
+  const canViewInmobiliarias = user?.rol === 'admin' || permissions.includes('view_inmobiliarias');
+  const canEditInmobiliarias = user?.rol === 'admin' || permissions.includes('edit_inmobiliarias');
+  const canLaunchInmobiliarias = user?.rol === 'admin' || permissions.includes('launch_inmobiliarias');
+  const canViewBalnearios = user?.rol === 'admin' || permissions.includes('view_balnearios');
+  const canEditBalnearios = user?.rol === 'admin' || permissions.includes('edit_balnearios');
+  const canLaunchBalnearios = user?.rol === 'admin' || permissions.includes('launch_balnearios');
   const isAdmin = user?.rol === 'admin';
 
   return (
@@ -88,7 +100,7 @@ export function AuthProvider({ children }) {
         loading,
         login,
         logout,
-        api,
+        supabase,
         canEditAlojamientos,
         canEditRelevamientos,
         canLaunchRelevamiento,

@@ -2,8 +2,14 @@ import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from './AuthContext';
 
+// Si el usuario no contiene @, se usa como nombre y se envía a Auth como usuario@local.gesell (minúsculas)
+function toAuthEmail(usuario) {
+  const v = (usuario || '').trim();
+  return v.includes('@') ? v : `${v.toLowerCase()}@local.gesell`;
+}
+
 export default function Login() {
-  const [email, setEmail] = useState('');
+  const [usuario, setUsuario] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -17,6 +23,7 @@ export default function Login() {
     setError('');
     setLoading(true);
     try {
+      const email = toAuthEmail(usuario);
       await login(email, password);
       navigate(from, { replace: true });
     } catch (err) {
@@ -33,19 +40,19 @@ export default function Login() {
           <img src="/logo-gesell.png" alt="Villa Gesell" />
         </div>
         <h1>Relevamiento de ocupación</h1>
-        <p className="login-subtitle">Iniciá sesión para continuar</p>
+        <p className="login-subtitle">Usuario y contraseña para ingresar</p>
         {error && <div className="alert error">{error}</div>}
         <form onSubmit={handleSubmit}>
           <div className="form-row">
-            <label htmlFor="login-email">Email</label>
+            <label htmlFor="login-usuario">Usuario</label>
             <input
-              id="login-email"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="ej: agente@gesell.gob.ar"
+              id="login-usuario"
+              type="text"
+              value={usuario}
+              onChange={(e) => setUsuario(e.target.value)}
+              placeholder="ej: admin"
               required
-              autoComplete="email"
+              autoComplete="username"
             />
           </div>
           <div className="form-row">
@@ -66,7 +73,7 @@ export default function Login() {
           </div>
         </form>
         <p className="login-hint">
-          Prueba: admin@gesell.gob.ar / agente@gesell.gob.ar / viewer@gesell.gob.ar — contraseña: gesell123
+          Usuario y contraseña que te asignaron. Ej: admin / gesell123
         </p>
       </div>
     </div>

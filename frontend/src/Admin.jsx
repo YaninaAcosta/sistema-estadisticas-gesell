@@ -4,8 +4,32 @@ import { useAuth } from './AuthContext';
 const OFICINAS_OPTIONS = ['Centro', 'Mar de las Pampas', 'Norte', 'Terminal'];
 const ROLES = ['viewer', 'agente', 'admin'];
 
+function parseOficina(of) {
+  if (of == null || of === '') return null;
+  if (Array.isArray(of)) return of;
+  if (typeof of === 'string' && of.startsWith('[')) {
+    try { return JSON.parse(of); } catch { return [of]; }
+  }
+  return [of];
+}
+
+const PERMISSIONS = [
+  { key: 'view_relevamiento', label: 'Ver relevamiento' },
+  { key: 'edit_relevamiento', label: 'Editar relevamiento' },
+  { key: 'view_alojamientos', label: 'Ver alojamientos' },
+  { key: 'edit_alojamientos', label: 'Editar alojamientos' },
+  { key: 'launch_relevamiento', label: 'Lanzar relevamiento' },
+  { key: 'manage_users', label: 'Gestionar usuarios y permisos' },
+  { key: 'view_inmobiliarias', label: 'Ver inmobiliarias' },
+  { key: 'edit_inmobiliarias', label: 'Editar inmobiliarias' },
+  { key: 'launch_inmobiliarias', label: 'Lanzar relevamiento inmobiliarias' },
+  { key: 'view_balnearios', label: 'Ver balnearios' },
+  { key: 'edit_balnearios', label: 'Editar balnearios' },
+  { key: 'launch_balnearios', label: 'Lanzar relevamiento balnearios' },
+];
+
 export default function Admin() {
-  const { api, canLaunchRelevamiento, canLaunchInmobiliarias, canLaunchBalnearios, canManageUsers } = useAuth();
+  const { supabase, canLaunchRelevamiento, canLaunchInmobiliarias, canLaunchBalnearios, canManageUsers } = useAuth();
   const [tab, setTab] = useState('lanzar');
   const [lanzarFecha, setLanzarFecha] = useState('');
   const [consultarOcupacion, setConsultarOcupacion] = useState(true);
@@ -23,7 +47,6 @@ export default function Admin() {
   const [lanzamientosInmob, setLanzamientosInmob] = useState([]);
   const [lanzamientosBaln, setLanzamientosBaln] = useState([]);
 
-  const [permisosList, setPermisosList] = useState([]);
   const [rolSeleccionado, setRolSeleccionado] = useState('agente');
   const [permisosPorRol, setPermisosPorRol] = useState({});
   const [permisosGuardando, setPermisosGuardando] = useState(false);
@@ -35,31 +58,37 @@ export default function Admin() {
   const [userForm, setUserForm] = useState({ oficinas: [], rol: '' });
 
   useEffect(() => {
-    if (!canManageUsers) return;
-    api('/permisos').then((r) => r.json()).then(setPermisosList).catch(() => setPermisosList([]));
-  }, [canManageUsers]);
-
-  useEffect(() => {
     if (!canManageUsers || !rolSeleccionado) return;
-    api(`/roles/${rolSeleccionado}/permisos`).then((r) => r.json()).then((list) => setPermisosPorRol((p) => ({ ...p, [rolSeleccionado]: list }))).catch(() => {});
-  }, [canManageUsers, rolSeleccionado]);
+    (async () => {
+      const { data, error } = await supabase.from('role_permissions').select('permission').eq('rol', rolSeleccionado);
+      const list = error ? [] : (data || []).map((r) => r.permission);
+      setPermisosPorRol((p) => ({ ...p, [rolSeleccionado]: list }));
+    })();
+  }, [canManageUsers, rolSeleccionado, supabase]);
 
   useEffect(() => {
     if (!canManageUsers) return;
-    api('/users').then((r) => r.json()).then(setUsers).catch(() => setUsersError('Error al cargar usuarios'));
-  }, [canManageUsers]);
+    supabase.from('profiles').select('*').order('nombre')
+      .then(({ data, error }) => {
+        if (error) setUsersError('Error al cargar usuarios');
+        else setUsers(data || []);
+      });
+  }, [canManageUsers, supabase]);
 
-  const loadLanzamientos = () => {
+  const loadLanzamientos = async () => {
     if (!canLaunchRelevamiento) return;
-    api('/relevamiento-config').then((r) => r.json()).then((data) => setLanzamientosList(Array.isArray(data) ? data : [])).catch(() => setLanzamientosList([]));
+    const { data, error } = await supabase.from('relevamiento_config').select('*').order('fecha', { ascending: false });
+    setLanzamientosList(error ? [] : (data || []));
   };
-  const loadLanzamientosInmob = () => {
+  const loadLanzamientosInmob = async () => {
     if (!canLaunchInmobiliarias) return;
-    api('/inmobiliarias-config').then((r) => r.json()).then((data) => setLanzamientosInmob(Array.isArray(data) ? data : [])).catch(() => setLanzamientosInmob([]));
+    const { data, error } = await supabase.from('inmobiliarias_config').select('*').order('fecha', { ascending: false });
+    setLanzamientosInmob(error ? [] : (data || []));
   };
-  const loadLanzamientosBaln = () => {
+  const loadLanzamientosBaln = async () => {
     if (!canLaunchBalnearios) return;
-    api('/balnearios-config').then((r) => r.json()).then((data) => setLanzamientosBaln(Array.isArray(data) ? data : [])).catch(() => setLanzamientosBaln([]));
+    const { data, error } = await supabase.from('balnearios_config').select('*').order('fecha', { ascending: false });
+    setLanzamientosBaln(error ? [] : (data || []));
   };
   useEffect(() => {
     if (tab !== 'lanzar') return;
@@ -76,17 +105,13 @@ export default function Admin() {
       setLanzarError('Elegí una fecha');
       return;
     }
-    const res = await api('/relevamiento-config', {
-      method: 'POST',
-      body: JSON.stringify({
-        fecha: lanzarFecha,
-        consultar_ocupacion: consultarOcupacion,
-        consultar_reservas: consultarReservas,
-      }),
-    });
-    if (!res.ok) {
-      const d = await res.json().catch(() => ({}));
-      setLanzarError(d.error || 'Error al lanzar');
+    const { error } = await supabase.from('relevamiento_config').upsert({
+      fecha: lanzarFecha,
+      consultar_ocupacion: consultarOcupacion ? 1 : 0,
+      consultar_reservas: consultarReservas ? 1 : 0,
+    }, { onConflict: 'fecha' });
+    if (error) {
+      setLanzarError(error.message || 'Error al lanzar');
       return;
     }
     setLanzarSuccess(`Relevamiento lanzado para el ${lanzarFecha}. Ocupación: ${consultarOcupacion ? 'Sí' : 'No'}. Reservas (%): ${consultarReservas ? 'Sí' : 'No'}.`);
@@ -102,23 +127,21 @@ export default function Admin() {
   const guardarPermisos = async () => {
     setPermisosGuardando(true);
     setPermisosSuccess('');
-    const res = await api(`/roles/${rolSeleccionado}/permisos`, {
-      method: 'PUT',
-      body: JSON.stringify({ permissions: permisosPorRol[rolSeleccionado] || [] }),
-    });
-    setPermisosGuardando(false);
-    if (res.ok) {
-      const list = await res.json();
-      setPermisosPorRol((p) => ({ ...p, [rolSeleccionado]: list }));
-      setPermisosSuccess('Guardado.');
-      setTimeout(() => setPermisosSuccess(''), 2500);
+    const permissions = permisosPorRol[rolSeleccionado] || [];
+    await supabase.from('role_permissions').delete().eq('rol', rolSeleccionado);
+    if (permissions.length) {
+      const rows = permissions.map((permission) => ({ rol: rolSeleccionado, permission }));
+      await supabase.from('role_permissions').insert(rows);
     }
+    setPermisosPorRol((p) => ({ ...p, [rolSeleccionado]: permissions }));
+    setPermisosSuccess('Guardado.');
+    setTimeout(() => setPermisosSuccess(''), 2500);
+    setPermisosGuardando(false);
   };
 
   const openEditUser = (u) => {
     setEditingUser(u.id);
-    const of = u.oficina;
-    const oficinas = Array.isArray(of) ? of : (of ? [of] : []);
+    const oficinas = parseOficina(u.oficina) || [];
     setUserForm({ oficinas, rol: u.rol || '' });
   };
 
@@ -130,13 +153,11 @@ export default function Admin() {
 
   const saveUser = async () => {
     if (!editingUser) return;
-    const oficinaPayload = userForm.rol === 'agente' ? userForm.oficinas : (userForm.oficinas?.[0] ?? null);
-    const res = await api(`/users/${editingUser}`, {
-      method: 'PUT',
-      body: JSON.stringify({ oficina: oficinaPayload, rol: userForm.rol }),
-    });
-    if (res.ok) {
-      const updated = await res.json();
+    const oficinaVal = userForm.rol === 'agente'
+      ? (userForm.oficinas?.length ? JSON.stringify(userForm.oficinas) : null)
+      : (userForm.oficinas?.[0] ?? null);
+    const { data: updated, error } = await supabase.from('profiles').update({ oficina: oficinaVal, rol: userForm.rol }).eq('id', editingUser).select().single();
+    if (!error && updated) {
       setUsers((list) => list.map((x) => (x.id === updated.id ? updated : x)));
       setEditingUser(null);
     }
@@ -147,8 +168,8 @@ export default function Admin() {
     setLanzarInmobError('');
     setLanzarInmobSuccess('');
     if (!lanzarInmobFecha) { setLanzarInmobError('Elegí una fecha'); return; }
-    const res = await api('/inmobiliarias-config', { method: 'POST', body: JSON.stringify({ fecha: lanzarInmobFecha }) });
-    if (!res.ok) { const d = await res.json().catch(() => ({})); setLanzarInmobError(d.error || 'Error al lanzar'); return; }
+    const { error } = await supabase.from('inmobiliarias_config').upsert({ fecha: lanzarInmobFecha }, { onConflict: 'fecha' });
+    if (error) { setLanzarInmobError(error.message || 'Error al lanzar'); return; }
     setLanzarInmobSuccess(`Relevamiento Inmobiliarias lanzado para el ${lanzarInmobFecha}.`);
     loadLanzamientosInmob();
   };
@@ -157,8 +178,8 @@ export default function Admin() {
     setLanzarBalnError('');
     setLanzarBalnSuccess('');
     if (!lanzarBalnFecha) { setLanzarBalnError('Elegí una fecha'); return; }
-    const res = await api('/balnearios-config', { method: 'POST', body: JSON.stringify({ fecha: lanzarBalnFecha }) });
-    if (!res.ok) { const d = await res.json().catch(() => ({})); setLanzarBalnError(d.error || 'Error al lanzar'); return; }
+    const { error } = await supabase.from('balnearios_config').upsert({ fecha: lanzarBalnFecha }, { onConflict: 'fecha' });
+    if (error) { setLanzarBalnError(error.message || 'Error al lanzar'); return; }
     setLanzarBalnSuccess(`Relevamiento Balnearios lanzado para el ${lanzarBalnFecha}.`);
     loadLanzamientosBaln();
   };
@@ -331,7 +352,7 @@ export default function Admin() {
             </select>
           </div>
           <div className="admin-permisos-list">
-            {permisosList.map((p) => (
+            {PERMISSIONS.map((p) => (
               <label key={p.key} className="admin-permisos-item">
                 <input
                   type="checkbox"
@@ -412,7 +433,7 @@ export default function Admin() {
                     ) : (
                       <>
                         <td>{u.rol}</td>
-                        <td>{Array.isArray(u.oficina) ? (u.oficina.length ? u.oficina.join(', ') : '—') : (u.oficina || '—')}</td>
+                        <td>{(() => { const o = parseOficina(u.oficina); return Array.isArray(o) ? (o.length ? o.join(', ') : '—') : (o || '—'); })()}</td>
                         <td><button type="button" className="secondary" onClick={() => openEditUser(u)}>Editar</button></td>
                       </>
                     )}

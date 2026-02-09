@@ -2,13 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from './AuthContext';
 import Contacto from './components/Contacto';
 import Modal from './components/Modal';
+import { getRelevamientoInmobFechas, getRelevamientoInmob, saveRelevamientoInmob } from './data/inmobiliarias.js';
 
 const LOCALIDADES_OPTIONS = ['Villa Gesell', 'Mar de las Pampas', 'Mar Azul', 'Las Gaviotas', 'Colonia Marina'];
 const OFICINAS_OPTIONS = ['Centro', 'Mar de las Pampas', 'Norte', 'Terminal'];
 const LLAMADOS_OPTIONS = ['Envié WhatsApp', 'Llamado', 'No llama', 'Sin contacto'];
 
 export default function Inmobiliarias() {
-  const { api, user, canEditInmobiliarias, isAdmin } = useAuth();
+  const { supabase, user, canEditInmobiliarias, isAdmin } = useAuth();
   const [tab, setTab] = useState('relevamiento');
   const [fechas, setFechas] = useState([]);
   const [fecha, setFecha] = useState('');
@@ -43,10 +44,8 @@ export default function Inmobiliarias() {
   };
 
   const loadFechas = () => {
-    api('/relevamiento-inmobiliarias/fechas')
-      .then((r) => r.json())
-      .then((list) => {
-        const arr = Array.isArray(list) ? list : [];
+    getRelevamientoInmobFechas(supabase)
+      .then((arr) => {
         setFechas(arr);
         if (arr.length && (!fecha || !arr.includes(fecha))) setFecha(arr[0]);
       })
@@ -61,16 +60,25 @@ export default function Inmobiliarias() {
       return;
     }
     setLoading(true);
-    api(`/relevamiento-inmobiliarias?fecha=${fecha}`)
-      .then((r) => r.json())
+    getRelevamientoInmob(supabase, fecha, isAdmin)
       .then(setData)
       .catch(() => setError('Error al cargar'))
       .finally(() => setLoading(false));
   }, [fecha]);
 
-  const loadList = () => {
+  const loadList = async () => {
     setListLoading(true);
-    api('/inmobiliarias').then((r) => r.json()).then(setList).catch(() => setError('Error al cargar')).finally(() => setListLoading(false));
+    try {
+      let q = supabase.from('inmobiliarias').select('*').order('prestador');
+      if (!isAdmin) q = q.or('oculto.is.null,oculto.eq.0');
+      const { data, error } = await q;
+      if (error) throw error;
+      setList(data || []);
+    } catch {
+      setError('Error al cargar');
+    } finally {
+      setListLoading(false);
+    }
   };
   useEffect(() => {
     if (tab === 'listado') loadList();
@@ -90,16 +98,16 @@ export default function Inmobiliarias() {
       observaciones: field === 'observaciones' ? value : (r.observaciones ?? null),
       oficina: field === 'oficina' ? value : (r.oficina ?? item.inmobiliaria?.oficina ?? null),
     };
-    const res = await api('/relevamiento-inmobiliarias', { method: 'POST', body: JSON.stringify(payload) });
-    setSaving(null);
-    if (res.ok) {
-      const updated = await res.json();
+    try {
+      const updated = await saveRelevamientoInmob(supabase, payload, user?.nombre);
       setData((prev) => ({
         ...prev,
         list: prev.list.map((x) =>
           x.inmobiliaria.id === inmobiliariaId ? { ...x, relevamiento: updated } : x
         ),
       }));
+    } finally {
+      setSaving(null);
     }
   };
 
@@ -129,28 +137,36 @@ export default function Inmobiliarias() {
   };
   const cancel = () => { setEditing(null); setError(''); };
   const doSave = async () => {
-    const body = { ...form, direccion: form.direccion || null, telefono_fijo: form.telefono_fijo || null, whatsapp: form.whatsapp || null, oficina: form.oficina || null };
-    if (editing === 'new') {
-      const res = await api('/inmobiliarias', { method: 'POST', body: JSON.stringify(body) });
-      if (!res.ok) { const d = await res.json().catch(() => ({})); setError(d.error || 'Error al crear'); return; }
-    } else {
-      const res = await api(`/inmobiliarias/${editing}`, { method: 'PUT', body: JSON.stringify(body) });
-      if (!res.ok) { const d = await res.json().catch(() => ({})); setError(d.error || 'Error al guardar'); return; }
+    const row = {
+      localidad: form.localidad || 'Villa Gesell',
+      prestador: form.prestador || '',
+      direccion: form.direccion || null,
+      telefono_fijo: form.telefono_fijo || null,
+      whatsapp: form.whatsapp || null,
+      oficina: form.oficina || null,
+    };
+    try {
+      if (editing === 'new') {
+        const { error } = await supabase.from('inmobiliarias').insert(row);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from('inmobiliarias').update(row).eq('id', editing);
+        if (error) throw error;
+      }
+      cancel();
+      loadList();
+    } catch (err) {
+      setError(err.message || (editing === 'new' ? 'Error al crear' : 'Error al guardar'));
     }
-    cancel();
-    loadList();
   };
   const remove = async (id) => {
     if (!window.confirm('¿Eliminar esta inmobiliaria?')) return;
-    const res = await api(`/inmobiliarias/${id}`, { method: 'DELETE' });
-    if (res.ok) loadList();
+    const { error } = await supabase.from('inmobiliarias').delete().eq('id', id);
+    if (!error) loadList();
   };
   const toggleOculto = async (i) => {
-    const res = await api(`/inmobiliarias/${i.id}`, {
-      method: 'PUT',
-      body: JSON.stringify({ ...i, oculto: !i.oculto }),
-    });
-    if (res.ok) loadList();
+    const { error } = await supabase.from('inmobiliarias').update({ oculto: i.oculto ? 0 : 1 }).eq('id', i.id);
+    if (!error) loadList();
   };
 
   return (

@@ -1,93 +1,87 @@
 # Sistema de relevamiento de estadísticas de turismo — Villa Gesell
 
-Sistema para cargar y consultar datos de ocupación por fecha (alojamientos, inmobiliarias, balnearios). Roles (solo lectura, agente, admin), Supabase como base de datos y despliegue del frontend en GitHub Pages.
+Sistema para cargar y consultar datos de ocupación por fecha (alojamientos, inmobiliarias, balnearios). Roles (solo lectura, agente, admin). **Solo Supabase + GitHub**: el frontend en GitHub Pages se conecta directo a Supabase (Auth y base de datos con RLS). No se usa backend en producción ni Render.
 
 **Repo:** [github.com/YaninaAcosta/sistema-estadisticas-gesell](https://github.com/YaninaAcosta/sistema-estadisticas-gesell)
 
 ---
 
-## GitHub Pages (ver la app en vivo y compartirla con el equipo)
+## Cómo funciona (solo Supabase + GitHub)
 
-La **interfaz** (React) se publica en GitHub Pages. La **API** (backend Node + Supabase) tiene que estar desplegada en algún servicio (Render, Railway, etc.) para que la app en github.io funcione.
+```
+GitHub Pages (frontend)  →  Supabase (Auth + Postgres con RLS)
+```
 
-### 1. Desplegar el backend (API) en Render (gratis)
-
-1. Entrá a [render.com](https://render.com) y registrate con GitHub.
-2. **New → Web Service**.
-3. Conectá el repo **sistema-estadisticas-gesell** y elegí:
-   - **Root Directory**: `backend`
-   - **Build Command**: `npm install`
-   - **Start Command**: `node src/index.js`
-   - **Environment**: agregá las variables (no las subas a GitHub):
-     - `SUPABASE_URL` = tu URL de Supabase
-     - `SUPABASE_SERVICE_ROLE_KEY` = tu service role key de Supabase
-     - `JWT_SECRET` = una frase larga y aleatoria (ej. `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`)
-     - `PORT` = `3001`
-4. Dejá que Render construya y arranque. Te va a dar una URL tipo:  
-   **https://sistema-estadisticas-gesell-xxxx.onrender.com**
-
-Esa URL es la **base de tu API**. No le agregues `/api` al final; el frontend ya usa `/api` en cada ruta.
-
-### 2. Activar GitHub Pages y configurar el secreto
-
-1. En tu repo **sistema-estadisticas-gesell** en GitHub:
-   - **Settings → Pages**
-   - En **Source** elegí: **GitHub Actions** (no "Deploy from a branch").
-2. **Settings → Secrets and variables → Actions**
-   - **New repository secret**
-   - Nombre: **VITE_API_URL**
-   - Valor: la URL del backend **sin** barra final, ej.  
-     `https://sistema-estadisticas-gesell-xxxx.onrender.com`
-
-Cada vez que hagas **push a `main`**, el workflow construye el frontend y lo publica en Pages. La app quedará en:
-
-**https://yaninaacosta.github.io/sistema-estadisticas-gesell/**
-
-Compartí ese link con tu equipo. Para que funcione, el backend en Render debe estar arriba y con las variables de Supabase bien configuradas.
-
-### 3. CORS
-
-El backend ya acepta peticiones desde `http://localhost:5173` y desde cualquier `https://*.github.io`. Si usás otro dominio para el frontend, agregá en Render la variable **CORS_ORIGIN** con la URL separada por comas si son varias.
+- **Autenticación**: Supabase Auth (email/contraseña).
+- **Datos**: el frontend lee y escribe en las tablas de Supabase; el acceso se controla con **Row Level Security (RLS)** según el rol de cada usuario.
+- **Despliegue**: cada push a `main` construye el frontend y lo publica en GitHub Pages. En el build se inyectan la URL y la clave anónima de Supabase desde los secretos del repo.
 
 ---
 
-## Probar en local
+## 1. Supabase (base de datos y auth)
 
-### Backend
+1. Creá un proyecto en [supabase.com](https://supabase.com).
+2. En **SQL Editor**, ejecutá en este orden:
+   - Todo el contenido de **`supabase/schema.sql`**.
+   - Todo el contenido de **`supabase/migrations/001_auth_and_rls.sql`** (tabla `profiles`, RLS, trigger para nuevos usuarios).
+3. Creá el **primer usuario admin**:
+   - En Supabase: **Authentication → Users → Add user** (email + contraseña).
+   - Copiá el **UUID** del usuario recién creado.
+   - En **SQL Editor** ejecutá algo como (reemplazá el UUID y el email):
 
-```bash
-cd backend
-cp .env.example .env   # creá .env con SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, JWT_SECRET
-npm install
-npm run dev
-```
+   ```sql
+   INSERT INTO profiles (id, email, nombre, rol, oficina)
+   VALUES ('el-uuid-del-usuario', 'admin@ejemplo.com', 'Admin', 'admin', NULL)
+   ON CONFLICT (id) DO UPDATE SET rol = 'admin', nombre = 'Admin';
+   ```
 
-Backend en **http://localhost:3001**.
+   A partir de ahí podés entrar con ese email/contraseña y, desde la app, asignar roles y permisos a otros usuarios en **Roles y permisos → Usuarios**.
 
-### Frontend
+Guía paso a paso: **[docs/SUPABASE-CONEXION.md](docs/SUPABASE-CONEXION.md)**.
+
+---
+
+## 2. GitHub Pages y secretos
+
+1. En el repo: **Settings → Pages** → **Source**: **GitHub Actions**.
+2. **Settings → Secrets and variables → Actions** → **New repository secret** (dos secretos):
+   - **VITE_SUPABASE_URL**: Project URL de Supabase (Project Settings → API).
+   - **VITE_SUPABASE_ANON_KEY**: clave **anon / public** (no la service_role). Es segura para el frontend porque RLS restringe qué puede ver/editar cada usuario.
+
+Cada push a `main` ejecuta el workflow que construye el frontend con esas variables y publica en Pages. La app queda en:
+
+**https://yaninaacosta.github.io/sistema-estadisticas-gesell/**
+
+(Reemplazá por tu usuario/repo si es otro.)
+
+---
+
+## 3. Probar en local
+
+Solo hace falta el frontend (Supabase se usa desde el navegador).
 
 ```bash
 cd frontend
+cp .env.example .env   # creá .env con VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY
 npm install
 npm run dev
 ```
 
-Frontend en **http://localhost:5173** (el proxy apunta al backend en 3001).
+Frontend en **http://localhost:5173**. Iniciá sesión con el usuario que creaste en Supabase (y al que le asignaste rol admin en `profiles`).
 
-### Usuarios de prueba
-
-Si corriste el seed: **admin@gesell.gob.ar** / **gesell123** (y los otros que estén en el seed).
+*(Opcional)* Si querés correr también el backend en local para otra API o scripts, en `backend` usá tu `.env` con `SUPABASE_URL` y `SUPABASE_SERVICE_ROLE_KEY`; para la app web no es necesario.
 
 ---
 
 ## Estructura
 
-- **frontend**: React + Vite, login, vistas por rol, tablas de relevamiento.
-- **backend**: Express, JWT, API REST; usa **Supabase** (Postgres).
-- **supabase/schema.sql**: esquema de tablas para Supabase.
+- **frontend**: React + Vite; Auth y datos vía **Supabase** (cliente `@supabase/supabase-js`). Sin backend en producción.
+- **supabase/schema.sql**: tablas base (alojamientos, relevamientos, inmobiliarias, balnearios, configs, etc.).
+- **supabase/migrations/001_auth_and_rls.sql**: tabla `profiles`, RLS y trigger para nuevos usuarios.
+- **backend**: opcional para desarrollo o tareas que requieran service role; la app en producción no lo usa.
 
 ## Permisos por rol
 
 - **Viewer**: solo ver.
 - **Agente**: ver y editar relevamientos (no alojamientos ni usuarios).
-- **Admin**: editar todo (alojamientos, relevamientos, usuarios, permisos).
+- **Admin**: editar todo (alojamientos, relevamientos, usuarios, permisos, lanzar fechas).
