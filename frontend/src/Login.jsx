@@ -13,7 +13,7 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const { login, authError, clearAuthError, supabase } = useAuth();
+  const { login, authError, clearAuthError } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const from = location.state?.from?.pathname || '/';
@@ -25,9 +25,6 @@ export default function Login() {
     }
   }, [authError, clearAuthError]);
 
-  useEffect(() => {
-    supabase?.auth?.getSession().catch(() => {});
-  }, [supabase]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();

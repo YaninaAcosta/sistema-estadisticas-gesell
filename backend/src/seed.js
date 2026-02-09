@@ -5,6 +5,7 @@ import { PERMISSIONS, setPermissionsForRole } from './auth.js';
 
 const users = [
   { email: 'admin@gesell.gob.ar', nombre: 'Admin', rol: 'admin', oficina: null },
+  { email: 'admin@local.gesell', nombre: 'Admin', rol: 'admin', oficina: null }, // login con "admin" usa este email
   { email: 'agente@gesell.gob.ar', nombre: 'Yésica U', rol: 'agente', oficina: 'Mar de las Pampas' },
   { email: 'viewer@gesell.gob.ar', nombre: 'Solo Lectura', rol: 'viewer', oficina: null },
 ];
@@ -94,7 +95,7 @@ async function seed() {
     });
   }
 
-  console.log('Seed listo. Usuarios: admin@gesell.gob.ar, agente@gesell.gob.ar, viewer@gesell.gob.ar — password: gesell123');
+  console.log('Seed listo. Ingresar con usuario "admin" (o admin@local.gesell) o admin@gesell.gob.ar — password: gesell123');
   console.log('Relevamiento de ejemplo: fecha', fechaEjemplo);
 }
 

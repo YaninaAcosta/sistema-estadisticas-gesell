@@ -5,7 +5,10 @@ import Modal from './components/Modal';
 
 export default function Layout() {
   const { user, logout, canManageUsers, canLaunchRelevamiento, canViewInmobiliarias, canViewBalnearios } = useAuth();
-  const showAdmin = canManageUsers || canLaunchRelevamiento;
+  const isAdmin = user?.rol === 'admin';
+  const showAdmin = isAdmin || canManageUsers || canLaunchRelevamiento;
+  const showInmobiliarias = isAdmin || canViewInmobiliarias;
+  const showBalnearios = isAdmin || canViewBalnearios;
   const [ayudaOpen, setAyudaOpen] = useState(false);
 
   return (
@@ -17,8 +20,8 @@ export default function Layout() {
         <div className="nav-links">
           <NavLink to="/" end>Inicio</NavLink>
           <NavLink to="/alojamientos">Alojamientos</NavLink>
-          {canViewInmobiliarias && <NavLink to="/inmobiliarias">Inmobiliarias</NavLink>}
-          {canViewBalnearios && <NavLink to="/balnearios">Balnearios</NavLink>}
+          {showInmobiliarias && <NavLink to="/inmobiliarias">Inmobiliarias</NavLink>}
+          {showBalnearios && <NavLink to="/balnearios">Balnearios</NavLink>}
           {showAdmin && <NavLink to="/admin">Roles y permisos</NavLink>}
         </div>
         <div className="nav-user-block">

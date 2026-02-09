@@ -5,14 +5,13 @@
 export async function backendRequest(client, path, options = {}) {
   const { apiBase, token } = client;
   const url = `${apiBase}${path}`;
+  const isJsonBody = options.body != null && (typeof options.body === 'string' || (typeof options.body === 'object' && !(options.body instanceof FormData)));
   const res = await fetch(url, {
     ...options,
     headers: {
       ...(options.headers || {}),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(options.body && typeof options.body === 'object' && !(options.body instanceof FormData)
-        ? { 'Content-Type': 'application/json' }
-        : {}),
+      ...(isJsonBody ? { 'Content-Type': 'application/json' } : {}),
     },
   });
   if (!res.ok) {

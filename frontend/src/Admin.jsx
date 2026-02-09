@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from './AuthContext';
+import { backendRequest } from './data/backendApi.js';
 
 const OFICINAS_OPTIONS = ['Centro', 'Mar de las Pampas', 'Norte', 'Terminal'];
 const ROLES = ['viewer', 'agente', 'admin'];
@@ -29,7 +30,8 @@ const PERMISSIONS = [
 ];
 
 export default function Admin() {
-  const { supabase, canLaunchRelevamiento, canLaunchInmobiliarias, canLaunchBalnearios, canManageUsers } = useAuth();
+  const { dataClient, supabase, canLaunchRelevamiento, canLaunchInmobiliarias, canLaunchBalnearios, canManageUsers } = useAuth();
+  const useBackend = dataClient?._backend;
   const [tab, setTab] = useState('lanzar');
   const [lanzarFecha, setLanzarFecha] = useState('');
   const [consultarOcupacion, setConsultarOcupacion] = useState(true);
@@ -60,33 +62,67 @@ export default function Admin() {
   useEffect(() => {
     if (!canManageUsers || !rolSeleccionado) return;
     (async () => {
+      if (useBackend) {
+        try {
+          const list = await backendRequest(dataClient, `/api/roles/${rolSeleccionado}/permisos`);
+          setPermisosPorRol((p) => ({ ...p, [rolSeleccionado]: Array.isArray(list) ? list : [] }));
+        } catch {
+          setPermisosPorRol((p) => ({ ...p, [rolSeleccionado]: [] }));
+        }
+        return;
+      }
       const { data, error } = await supabase.from('role_permissions').select('permission').eq('rol', rolSeleccionado);
       const list = error ? [] : (data || []).map((r) => r.permission);
       setPermisosPorRol((p) => ({ ...p, [rolSeleccionado]: list }));
     })();
-  }, [canManageUsers, rolSeleccionado, supabase]);
+  }, [canManageUsers, rolSeleccionado, supabase, useBackend, dataClient]);
 
   useEffect(() => {
     if (!canManageUsers) return;
-    supabase.from('profiles').select('*').order('nombre')
-      .then(({ data, error }) => {
-        if (error) setUsersError('Error al cargar usuarios');
-        else setUsers(data || []);
-      });
-  }, [canManageUsers, supabase]);
+    if (useBackend) {
+      setUsersError('');
+      backendRequest(dataClient, '/api/users')
+        .then((data) => setUsers(Array.isArray(data) ? data : []))
+        .catch(() => setUsersError('Error al cargar usuarios'));
+    } else {
+      setUsers([]);
+      setUsersError('Usuarios solo disponibles con backend (VITE_API_URL).');
+    }
+  }, [canManageUsers, useBackend, dataClient]);
 
   const loadLanzamientos = async () => {
     if (!canLaunchRelevamiento) return;
+    if (useBackend) {
+      try {
+        const data = await backendRequest(dataClient, '/api/relevamiento-config');
+        setLanzamientosList(Array.isArray(data) ? data : []);
+      } catch { setLanzamientosList([]); }
+      return;
+    }
     const { data, error } = await supabase.from('relevamiento_config').select('*').order('fecha', { ascending: false });
     setLanzamientosList(error ? [] : (data || []));
   };
   const loadLanzamientosInmob = async () => {
     if (!canLaunchInmobiliarias) return;
+    if (useBackend) {
+      try {
+        const data = await backendRequest(dataClient, '/api/inmobiliarias-config');
+        setLanzamientosInmob(Array.isArray(data) ? data : []);
+      } catch { setLanzamientosInmob([]); }
+      return;
+    }
     const { data, error } = await supabase.from('inmobiliarias_config').select('*').order('fecha', { ascending: false });
     setLanzamientosInmob(error ? [] : (data || []));
   };
   const loadLanzamientosBaln = async () => {
     if (!canLaunchBalnearios) return;
+    if (useBackend) {
+      try {
+        const data = await backendRequest(dataClient, '/api/balnearios-config');
+        setLanzamientosBaln(Array.isArray(data) ? data : []);
+      } catch { setLanzamientosBaln([]); }
+      return;
+    }
     const { data, error } = await supabase.from('balnearios_config').select('*').order('fecha', { ascending: false });
     setLanzamientosBaln(error ? [] : (data || []));
   };
@@ -105,17 +141,29 @@ export default function Admin() {
       setLanzarError('Elegí una fecha');
       return;
     }
-    const { error } = await supabase.from('relevamiento_config').upsert({
-      fecha: lanzarFecha,
-      consultar_ocupacion: consultarOcupacion ? 1 : 0,
-      consultar_reservas: consultarReservas ? 1 : 0,
-    }, { onConflict: 'fecha' });
-    if (error) {
-      setLanzarError(error.message || 'Error al lanzar');
-      return;
+    try {
+      if (useBackend) {
+        await backendRequest(dataClient, '/api/relevamiento-config', {
+          method: 'POST',
+          body: JSON.stringify({
+            fecha: lanzarFecha,
+            consultar_ocupacion: consultarOcupacion,
+            consultar_reservas: consultarReservas,
+          }),
+        });
+      } else {
+        const { error } = await supabase.from('relevamiento_config').upsert({
+          fecha: lanzarFecha,
+          consultar_ocupacion: consultarOcupacion ? 1 : 0,
+          consultar_reservas: consultarReservas ? 1 : 0,
+        }, { onConflict: 'fecha' });
+        if (error) throw error;
+      }
+      setLanzarSuccess(`Relevamiento lanzado para el ${lanzarFecha}. Ocupación: ${consultarOcupacion ? 'Sí' : 'No'}. Reservas (%): ${consultarReservas ? 'Sí' : 'No'}.`);
+      loadLanzamientos();
+    } catch (err) {
+      setLanzarError(err.message || 'Error al lanzar');
     }
-    setLanzarSuccess(`Relevamiento lanzado para el ${lanzarFecha}. Ocupación: ${consultarOcupacion ? 'Sí' : 'No'}. Reservas (%): ${consultarReservas ? 'Sí' : 'No'}.`);
-    loadLanzamientos();
   };
 
   const togglePermiso = (permKey) => {
@@ -128,14 +176,25 @@ export default function Admin() {
     setPermisosGuardando(true);
     setPermisosSuccess('');
     const permissions = permisosPorRol[rolSeleccionado] || [];
-    await supabase.from('role_permissions').delete().eq('rol', rolSeleccionado);
-    if (permissions.length) {
-      const rows = permissions.map((permission) => ({ rol: rolSeleccionado, permission }));
-      await supabase.from('role_permissions').insert(rows);
+    try {
+      if (useBackend) {
+        await backendRequest(dataClient, `/api/roles/${rolSeleccionado}/permisos`, {
+          method: 'PUT',
+          body: JSON.stringify({ permissions }),
+        });
+      } else {
+        await supabase.from('role_permissions').delete().eq('rol', rolSeleccionado);
+        if (permissions.length) {
+          const rows = permissions.map((permission) => ({ rol: rolSeleccionado, permission }));
+          await supabase.from('role_permissions').insert(rows);
+        }
+      }
+      setPermisosPorRol((p) => ({ ...p, [rolSeleccionado]: permissions }));
+      setPermisosSuccess('Guardado.');
+      setTimeout(() => setPermisosSuccess(''), 2500);
+    } catch {
+      setPermisosSuccess('Error al guardar');
     }
-    setPermisosPorRol((p) => ({ ...p, [rolSeleccionado]: permissions }));
-    setPermisosSuccess('Guardado.');
-    setTimeout(() => setPermisosSuccess(''), 2500);
     setPermisosGuardando(false);
   };
 
@@ -152,14 +211,19 @@ export default function Admin() {
   };
 
   const saveUser = async () => {
-    if (!editingUser) return;
+    if (!editingUser || !useBackend) return;
     const oficinaVal = userForm.rol === 'agente'
-      ? (userForm.oficinas?.length ? JSON.stringify(userForm.oficinas) : null)
+      ? (userForm.oficinas?.length ? userForm.oficinas : null)
       : (userForm.oficinas?.[0] ?? null);
-    const { data: updated, error } = await supabase.from('profiles').update({ oficina: oficinaVal, rol: userForm.rol }).eq('id', editingUser).select().single();
-    if (!error && updated) {
-      setUsers((list) => list.map((x) => (x.id === updated.id ? updated : x)));
+    try {
+      const updated = await backendRequest(dataClient, `/api/users/${editingUser}`, {
+        method: 'PUT',
+        body: JSON.stringify({ oficina: oficinaVal, rol: userForm.rol }),
+      });
+      setUsers((list) => list.map((x) => (x.id === editingUser ? { ...x, ...updated } : x)));
       setEditingUser(null);
+    } catch {
+      setUsersError('Error al guardar');
     }
   };
 
@@ -168,20 +232,36 @@ export default function Admin() {
     setLanzarInmobError('');
     setLanzarInmobSuccess('');
     if (!lanzarInmobFecha) { setLanzarInmobError('Elegí una fecha'); return; }
-    const { error } = await supabase.from('inmobiliarias_config').upsert({ fecha: lanzarInmobFecha }, { onConflict: 'fecha' });
-    if (error) { setLanzarInmobError(error.message || 'Error al lanzar'); return; }
-    setLanzarInmobSuccess(`Relevamiento Inmobiliarias lanzado para el ${lanzarInmobFecha}.`);
-    loadLanzamientosInmob();
+    try {
+      if (useBackend) {
+        await backendRequest(dataClient, '/api/inmobiliarias-config', { method: 'POST', body: JSON.stringify({ fecha: lanzarInmobFecha }) });
+      } else {
+        const { error } = await supabase.from('inmobiliarias_config').upsert({ fecha: lanzarInmobFecha }, { onConflict: 'fecha' });
+        if (error) throw error;
+      }
+      setLanzarInmobSuccess(`Relevamiento Inmobiliarias lanzado para el ${lanzarInmobFecha}.`);
+      loadLanzamientosInmob();
+    } catch (err) {
+      setLanzarInmobError(err.message || 'Error al lanzar');
+    }
   };
   const lanzarBalnearios = async (e) => {
     e.preventDefault();
     setLanzarBalnError('');
     setLanzarBalnSuccess('');
     if (!lanzarBalnFecha) { setLanzarBalnError('Elegí una fecha'); return; }
-    const { error } = await supabase.from('balnearios_config').upsert({ fecha: lanzarBalnFecha }, { onConflict: 'fecha' });
-    if (error) { setLanzarBalnError(error.message || 'Error al lanzar'); return; }
-    setLanzarBalnSuccess(`Relevamiento Balnearios lanzado para el ${lanzarBalnFecha}.`);
-    loadLanzamientosBaln();
+    try {
+      if (useBackend) {
+        await backendRequest(dataClient, '/api/balnearios-config', { method: 'POST', body: JSON.stringify({ fecha: lanzarBalnFecha }) });
+      } else {
+        const { error } = await supabase.from('balnearios_config').upsert({ fecha: lanzarBalnFecha }, { onConflict: 'fecha' });
+        if (error) throw error;
+      }
+      setLanzarBalnSuccess(`Relevamiento Balnearios lanzado para el ${lanzarBalnFecha}.`);
+      loadLanzamientosBaln();
+    } catch (err) {
+      setLanzarBalnError(err.message || 'Error al lanzar');
+    }
   };
 
   const showLanzar = canLaunchRelevamiento || canLaunchInmobiliarias || canLaunchBalnearios;
