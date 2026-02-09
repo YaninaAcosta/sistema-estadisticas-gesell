@@ -31,7 +31,7 @@ jobs:
       - name: Install and build frontend
         working-directory: frontend
         env:
-          BASE_PATH: /relevamiento-gesell/
+          BASE_PATH: /sistema-estadisticas-gesell/
           VITE_API_URL: ${{ secrets.VITE_API_URL }}
         run: |
           npm ci
