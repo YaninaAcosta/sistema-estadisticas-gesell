@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
-import { authMiddleware, requirePermission, getPermissionsForRole, PERMISSIONS, setPermissionsForRole } from './auth.js';
+import { authMiddleware, requirePermission, getPermissionsForRole, PERMISSIONS, setPermissionsForRole, comparePassword, createToken, findUserByEmail } from './auth.js';
 import { supabase } from './supabase.js';
 
 const OFICINAS_OPTIONS = ['Centro', 'Mar de las Pampas', 'Norte', 'Terminal'];
@@ -60,8 +60,6 @@ app.use(cors(corsOptions));
 app.use(express.json());
 
 // —— Auth ——
-import { comparePassword, createToken, findUserByEmail, getPermissionsForRole } from './auth.js';
-
 app.post('/api/auth/login', async (req, res, next) => {
   try {
     const { email, password } = req.body || {};
