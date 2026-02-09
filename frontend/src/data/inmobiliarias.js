@@ -3,18 +3,27 @@
  */
 
 export async function getRelevamientoInmobFechas(supabase) {
-  const { data: fromRelev } = await supabase.from('relevamiento_inmobiliarias').select('fecha').order('fecha', { ascending: false }).limit(100);
-  const { data: fromConfig } = await supabase.from('inmobiliarias_config').select('fecha');
-  const set = new Set([...(fromRelev || []).map((r) => r.fecha), ...(fromConfig || []).map((r) => r.fecha)]);
+  const [resRelev, resConfig] = await Promise.all([
+    supabase.from('relevamiento_inmobiliarias').select('fecha').order('fecha', { ascending: false }).limit(100),
+    supabase.from('inmobiliarias_config').select('fecha'),
+  ]);
+  const set = new Set([
+    ...(resRelev.data || []).map((r) => r.fecha),
+    ...(resConfig.data || []).map((r) => r.fecha),
+  ]);
   return [...set].sort((a, b) => b.localeCompare(a)).slice(0, 80);
 }
 
 export async function getRelevamientoInmob(supabase, fecha, isAdmin) {
   let qInm = supabase.from('inmobiliarias').select('*').order('prestador');
   if (!isAdmin) qInm = qInm.or('oculto.is.null,oculto.eq.0');
-  const { data: inmobiliarias, error: e1 } = await qInm;
+  const [resInm, resRelev] = await Promise.all([
+    qInm,
+    supabase.from('relevamiento_inmobiliarias').select('*').eq('fecha', fecha),
+  ]);
+  const { data: inmobiliarias, error: e1 } = resInm;
+  const { data: relevamientos, error: e2 } = resRelev;
   if (e1) throw e1;
-  const { data: relevamientos, error: e2 } = await supabase.from('relevamiento_inmobiliarias').select('*').eq('fecha', fecha);
   if (e2) throw e2;
   const byInmob = Object.fromEntries((relevamientos || []).map((r) => [r.inmobiliaria_id, r]));
   return { fecha, list: (inmobiliarias || []).map((i) => ({ inmobiliaria: i, relevamiento: byInmob[i.id] || null })) };

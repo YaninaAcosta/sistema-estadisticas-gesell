@@ -3,18 +3,27 @@
  */
 
 export async function getRelevamientoBalnFechas(supabase) {
-  const { data: fromRelev } = await supabase.from('relevamiento_balnearios').select('fecha').order('fecha', { ascending: false }).limit(100);
-  const { data: fromConfig } = await supabase.from('balnearios_config').select('fecha');
-  const set = new Set([...(fromRelev || []).map((r) => r.fecha), ...(fromConfig || []).map((r) => r.fecha)]);
+  const [resRelev, resConfig] = await Promise.all([
+    supabase.from('relevamiento_balnearios').select('fecha').order('fecha', { ascending: false }).limit(100),
+    supabase.from('balnearios_config').select('fecha'),
+  ]);
+  const set = new Set([
+    ...(resRelev.data || []).map((r) => r.fecha),
+    ...(resConfig.data || []).map((r) => r.fecha),
+  ]);
   return [...set].sort((a, b) => b.localeCompare(a)).slice(0, 80);
 }
 
 export async function getRelevamientoBaln(supabase, fecha, isAdmin) {
   let qBaln = supabase.from('balnearios').select('*').order('prestador');
   if (!isAdmin) qBaln = qBaln.or('oculto.is.null,oculto.eq.0');
-  const { data: balnearios, error: e1 } = await qBaln;
+  const [resBaln, resRelev] = await Promise.all([
+    qBaln,
+    supabase.from('relevamiento_balnearios').select('*').eq('fecha', fecha),
+  ]);
+  const { data: balnearios, error: e1 } = resBaln;
+  const { data: relevamientos, error: e2 } = resRelev;
   if (e1) throw e1;
-  const { data: relevamientos, error: e2 } = await supabase.from('relevamiento_balnearios').select('*').eq('fecha', fecha);
   if (e2) throw e2;
   const byBaln = Object.fromEntries((relevamientos || []).map((r) => [r.balneario_id, r]));
   return { fecha, list: (balnearios || []).map((b) => ({ balneario: b, relevamiento: byBaln[b.id] || null })) };

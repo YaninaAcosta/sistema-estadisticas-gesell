@@ -14,7 +14,23 @@ function parseOficina(val) {
   return val;
 }
 
-async function fetchProfileAndPermissions(userId) {
+async function fetchProfileAndPermissions() {
+  const { data: raw, error } = await supabase.rpc('get_my_profile_with_permissions');
+  if (error || raw == null) {
+    return null;
+  }
+  const profile = {
+    id: raw.id,
+    email: raw.email,
+    nombre: raw.nombre,
+    rol: raw.rol,
+    oficina: parseOficina(raw.oficina),
+    permissions: Array.isArray(raw.permissions) ? raw.permissions : [],
+  };
+  return profile;
+}
+
+async function fetchProfileAndPermissionsFallback(userId) {
   const { data: profile, error: e1 } = await supabase
     .from('profiles')
     .select('id, email, nombre, rol, oficina')
@@ -49,8 +65,8 @@ export function AuthProvider({ children }) {
     supabase.auth.getSession()
       .then(({ data: { session } }) => {
         if (!session?.user) return;
-        return fetchProfileAndPermissions(session.user.id)
-          .then(setUser)
+        return fetchProfileAndPermissions()
+          .then((u) => u != null ? setUser(u) : fetchProfileAndPermissionsFallback(session.user.id).then(setUser))
           .catch(() => setUser(null));
       })
       .catch(() => {})
@@ -66,7 +82,7 @@ export function AuthProvider({ children }) {
         return;
       }
       if (session?.user) {
-        const u = await fetchProfileAndPermissions(session.user.id);
+        const u = await fetchProfileAndPermissions() ?? await fetchProfileAndPermissionsFallback(session.user.id);
         setUser(u);
       }
     });
@@ -81,7 +97,7 @@ export function AuthProvider({ children }) {
   const login = async (email, password) => {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw new Error(error.message || 'Error al iniciar sesión');
-    const fullUser = await fetchProfileAndPermissions(data.user.id);
+    const fullUser = await fetchProfileAndPermissions() ?? await fetchProfileAndPermissionsFallback(data.user.id);
     if (!fullUser) {
       await supabase.auth.signOut();
       throw new Error('No se encontró tu perfil. Ejecutá en Supabase (SQL Editor) el INSERT en la tabla profiles con tu User UID de Authentication → Users.');

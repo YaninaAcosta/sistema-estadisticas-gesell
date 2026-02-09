@@ -2,9 +2,14 @@
  * Acceso a relevamientos (alojamientos) vía Supabase. Reemplaza las llamadas al backend.
  */
 export async function getRelevamientoFechas(supabase) {
-  const { data: fromRelev } = await supabase.from('relevamientos').select('fecha').order('fecha', { ascending: false }).limit(100);
-  const { data: fromConfig } = await supabase.from('relevamiento_config').select('fecha');
-  const set = new Set([...(fromRelev || []).map((r) => r.fecha), ...(fromConfig || []).map((r) => r.fecha)]);
+  const [resRelev, resConfig] = await Promise.all([
+    supabase.from('relevamientos').select('fecha').order('fecha', { ascending: false }).limit(100),
+    supabase.from('relevamiento_config').select('fecha'),
+  ]);
+  const set = new Set([
+    ...(resRelev.data || []).map((r) => r.fecha),
+    ...(resConfig.data || []).map((r) => r.fecha),
+  ]);
   return [...set].sort((a, b) => b.localeCompare(a)).slice(0, 80);
 }
 
@@ -13,9 +18,13 @@ export async function getRelevamiento(supabase, fecha, isAdmin) {
   const config = configRow || { consultar_ocupacion: 1, consultar_reservas: 0 };
   let qAloj = supabase.from('alojamientos').select('*').order('prestador');
   if (!isAdmin) qAloj = qAloj.or('oculto.is.null,oculto.eq.0');
-  const { data: alojamientos, error: e1 } = await qAloj;
+  const [resAloj, resRelev] = await Promise.all([
+    qAloj,
+    supabase.from('relevamientos').select('*').eq('fecha', fecha),
+  ]);
+  const { data: alojamientos, error: e1 } = resAloj;
+  const { data: relevamientos, error: e2 } = resRelev;
   if (e1) throw e1;
-  const { data: relevamientos, error: e2 } = await supabase.from('relevamientos').select('*').eq('fecha', fecha);
   if (e2) throw e2;
   const byAloj = Object.fromEntries((relevamientos || []).map((r) => [r.alojamiento_id, r]));
   const list = (alojamientos || []).map((a) => {
