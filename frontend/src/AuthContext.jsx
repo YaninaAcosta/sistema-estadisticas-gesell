@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { supabase, hasSupabaseConfig } from './supabase.js';
+import { supabase, hasSupabaseConfig, supabaseUrlForDebug } from './supabase.js';
 
 const AuthContext = createContext(null);
 
@@ -15,7 +15,7 @@ function parseOficina(val) {
 }
 
 const RPC_TIMEOUT_MS = 4500;
-const LOGIN_TIMEOUT_MS = 18000;
+const LOGIN_TIMEOUT_MS = 30000;
 
 function timeoutPromise(ms, message = 'TIMEOUT') {
   return new Promise((_, rej) =>
@@ -106,7 +106,21 @@ export function AuthProvider({ children }) {
 
   const login = async (email, password) => {
     const doLogin = async () => {
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      if (supabaseUrlForDebug && typeof window !== 'undefined') {
+        console.info('[Relevamiento Gesell] Conectando a Supabase:', supabaseUrlForDebug);
+      }
+      let data, error;
+      try {
+        const result = await supabase.auth.signInWithPassword({ email, password });
+        data = result.data;
+        error = result.error;
+      } catch (err) {
+        const msg = err?.message || '';
+        if (msg.includes('fetch') || msg.includes('network') || msg.includes('Failed')) {
+          throw new Error('No se pudo conectar con Supabase. Revisá que VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY en GitHub Secrets sean del mismo proyecto y estén bien copiados.');
+        }
+        throw err;
+      }
       if (error) throw new Error(error.message || 'Error al iniciar sesión');
 
       const stubUser = {
@@ -145,9 +159,15 @@ export function AuthProvider({ children }) {
       return stubUser;
     };
 
+    const timeoutMsg = [
+      'Supabase no respondió a tiempo. Posibles causas:',
+      '• Proyecto pausado (plan gratis) → entrá a Supabase Dashboard y restoralo.',
+      '• URL o Anon Key incorrectos en el repo (GitHub → Settings → Secrets).',
+      '• Revisá en F12 → Network la petición a supabase.co (status y tiempo).',
+    ].join('\n');
     return await Promise.race([
       doLogin(),
-      timeoutPromise(LOGIN_TIMEOUT_MS, 'La conexión está tardando mucho. Revisá tu internet e intentá de nuevo.'),
+      timeoutPromise(LOGIN_TIMEOUT_MS, timeoutMsg),
     ]);
   };
 

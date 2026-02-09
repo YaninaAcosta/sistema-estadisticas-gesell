@@ -52,7 +52,7 @@ export default function Login() {
         </div>
         <h1>Relevamiento de ocupación</h1>
         <p className="login-subtitle">Usuario y contraseña para ingresar</p>
-        {error && <div className="alert error">{error}</div>}
+        {error && <div className="alert error" style={{ whiteSpace: 'pre-line' }}>{error}</div>}
         <form onSubmit={handleSubmit}>
           <div className="form-row">
             <label htmlFor="login-usuario">Usuario</label>

@@ -1,6 +1,6 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { BrowserRouter } from 'react-router-dom';
+import { HashRouter } from 'react-router-dom';
 import App from './App';
 import { AuthProvider } from './AuthContext';
 import './index.css';
@@ -29,7 +29,7 @@ class ErrorBoundary extends React.Component {
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <ErrorBoundary>
-      <BrowserRouter basename={import.meta.env.VITE_BASE_PATH || import.meta.env.BASE_URL}>
+      <HashRouter basename="/">
         <AuthProvider>
           <App />
         </AuthProvider>

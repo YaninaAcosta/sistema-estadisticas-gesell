@@ -13,3 +13,4 @@ export const supabase = createClient(
   anonKey || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.placeholder'
 );
 export const hasSupabaseConfig = hasConfig;
+export const supabaseUrlForDebug = hasConfig ? url.replace(/\/$/, '') : null;
