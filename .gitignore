@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Env (nunca subir claves)
+.env
+.env.local
+.env.*.local
+backend/.env
+
+# Build / output
+frontend/dist/
+**/dist/
+
+# DB local (si usás SQLite u otro)
+*.db
+backend/data/*.db
+
+# IDE / OS
+.DS_Store
+*.log
+.cache/
