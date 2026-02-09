@@ -13,7 +13,7 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const { login, authError, clearAuthError } = useAuth();
+  const { login, authError, clearAuthError, supabase } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const from = location.state?.from?.pathname || '/';
@@ -24,6 +24,10 @@ export default function Login() {
       clearAuthError();
     }
   }, [authError, clearAuthError]);
+
+  useEffect(() => {
+    supabase?.auth?.getSession().catch(() => {});
+  }, [supabase]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -75,9 +79,12 @@ export default function Login() {
           </div>
           <div className="form-actions">
             <button type="submit" disabled={loading}>
-              {loading ? 'Entrando…' : 'Entrar'}
+              {loading ? 'Conectando…' : 'Entrar'}
             </button>
           </div>
+          {loading && (
+            <p className="login-loading-hint">Puede tardar unos segundos según tu conexión.</p>
+          )}
         </form>
         <p className="login-hint">
           Usuario y contraseña que te asignaron. Ej: admin / gesell123
