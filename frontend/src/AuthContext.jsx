@@ -38,16 +38,24 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (!session?.user) {
+    let cancelled = false;
+    const timeout = window.setTimeout(() => {
+      if (!cancelled) setLoading(false);
+    }, 10000);
+
+    supabase.auth.getSession()
+      .then(({ data: { session } }) => {
+        if (!session?.user) return;
+        return fetchProfileAndPermissions(session.user.id)
+          .then(setUser)
+          .catch(() => setUser(null));
+      })
+      .catch(() => {})
+      .finally(() => {
+        cancelled = true;
+        window.clearTimeout(timeout);
         setLoading(false);
-        return;
-      }
-      fetchProfileAndPermissions(session.user.id)
-        .then(setUser)
-        .catch(() => setUser(null))
-        .finally(() => setLoading(false));
-    });
+      });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (event === 'SIGNED_OUT') {
