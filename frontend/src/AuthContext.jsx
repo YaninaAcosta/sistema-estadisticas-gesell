@@ -14,6 +14,15 @@ function parseOficina(val) {
   return val;
 }
 
+const RPC_TIMEOUT_MS = 4500;
+const LOGIN_TIMEOUT_MS = 18000;
+
+function timeoutPromise(ms, message = 'TIMEOUT') {
+  return new Promise((_, rej) =>
+    setTimeout(() => rej(new Error(message)), ms)
+  );
+}
+
 async function fetchProfileAndPermissions() {
   const { data: raw, error } = await supabase.rpc('get_my_profile_with_permissions');
   if (error || raw == null) {
@@ -52,6 +61,7 @@ async function fetchProfileAndPermissionsFallback(userId) {
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [authError, setAuthError] = useState(null);
 
   useEffect(() => {
     if (!hasSupabaseConfig) return;
@@ -95,15 +105,50 @@ export function AuthProvider({ children }) {
   }, []);
 
   const login = async (email, password) => {
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) throw new Error(error.message || 'Error al iniciar sesión');
-    const fullUser = await fetchProfileAndPermissions() ?? await fetchProfileAndPermissionsFallback(data.user.id);
-    if (!fullUser) {
-      await supabase.auth.signOut();
-      throw new Error('No se encontró tu perfil. Ejecutá en Supabase (SQL Editor) el INSERT en la tabla profiles con tu User UID de Authentication → Users.');
-    }
-    setUser(fullUser);
-    return fullUser;
+    const doLogin = async () => {
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) throw new Error(error.message || 'Error al iniciar sesión');
+
+      const stubUser = {
+        id: data.user.id,
+        email: data.user.email ?? '',
+        nombre: 'Cargando…',
+        rol: 'viewer',
+        oficina: null,
+        permissions: [],
+        _loadingProfile: true,
+      };
+      setUser(stubUser);
+
+      const loadProfile = async () => {
+        let fullUser = null;
+        try {
+          fullUser = await Promise.race([
+            fetchProfileAndPermissions(),
+            timeoutPromise(RPC_TIMEOUT_MS),
+          ]);
+        } catch (_) {}
+        if (fullUser == null) {
+          fullUser = await fetchProfileAndPermissionsFallback(data.user.id);
+        }
+        if (!fullUser) {
+          await supabase.auth.signOut();
+          setUser(null);
+          setAuthError('No se encontró tu perfil. Revisá en Supabase que exista el registro en la tabla profiles.');
+          return;
+        }
+        setAuthError(null);
+        setUser(fullUser);
+      };
+      loadProfile();
+
+      return stubUser;
+    };
+
+    return await Promise.race([
+      doLogin(),
+      timeoutPromise(LOGIN_TIMEOUT_MS, 'La conexión está tardando mucho. Revisá tu internet e intentá de nuevo.'),
+    ]);
   };
 
   const logout = () => {
@@ -129,6 +174,8 @@ export function AuthProvider({ children }) {
       value={{
         user,
         loading,
+        authError,
+        clearAuthError: () => setAuthError(null),
         login,
         logout,
         supabase,
