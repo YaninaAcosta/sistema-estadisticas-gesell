@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { supabase } from './supabase.js';
+import { supabase, hasSupabaseConfig } from './supabase.js';
 
 const AuthContext = createContext(null);
 
@@ -35,13 +35,16 @@ async function fetchProfileAndPermissions(userId) {
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
+    if (!hasSupabaseConfig) return;
+
     let cancelled = false;
+    setLoading(true);
     const timeout = window.setTimeout(() => {
       if (!cancelled) setLoading(false);
-    }, 10000);
+    }, 8000);
 
     supabase.auth.getSession()
       .then(({ data: { session } }) => {
@@ -68,7 +71,11 @@ export function AuthProvider({ children }) {
       }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeout);
+      subscription.unsubscribe();
+    };
   }, []);
 
   const login = async (email, password) => {
